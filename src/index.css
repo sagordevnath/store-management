@@ -1,0 +1,152 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  @apply bg-ink-50 font-sans text-ink-800 antialiased;
+}
+
+/* ---------- dark mode ---------- */
+/* Surfaces flip via CSS variables; `dark` class on <html> activates them. */
+html.dark body {
+  @apply bg-[#0b1015] text-ink-100;
+}
+html.dark {
+  color-scheme: dark;
+}
+/* Any element using a light surface class gets repainted inside html.dark. */
+html.dark .bg-white {
+  background-color: #131a23;
+}
+html.dark .bg-ink-50 {
+  background-color: #0f151d;
+}
+html.dark .bg-ink-100 {
+  background-color: #1c2530;
+}
+html.dark .bg-ink-200 {
+  background-color: #26303d;
+}
+html.dark .bg-ink-900 {
+  background-color: #0f151d;
+}
+html.dark .bg-brand-600 {
+  background-color: #2e8560;
+}
+html.dark .hover\:bg-brand-700:hover {
+  background-color: #35976e;
+}
+html.dark .hover\:bg-ink-50:hover {
+  background-color: #18202a;
+}
+html.dark .hover\:bg-ink-100:hover {
+  background-color: #232d39;
+}
+html.dark .text-ink-800,
+html.dark .text-ink-900 {
+  color: #e5eaf1;
+}
+html.dark .text-ink-700 {
+  color: #c8d1dd;
+}
+html.dark .text-ink-600 {
+  color: #a9b5c6;
+}
+html.dark .text-ink-500 {
+  color: #8d9aad;
+}
+html.dark .text-ink-400 {
+  color: #75849a;
+}
+html.dark .border-ink-100 {
+  border-color: #232d39;
+}
+html.dark .border-ink-200,
+html.dark .border-ink-200\/80 {
+  border-color: #26303d;
+}
+html.dark .border-ink-300 {
+  border-color: #334052;
+}
+html.dark .bg-ink-950\/45 {
+  background-color: rgba(3, 6, 10, 0.62);
+}
+html.dark .shadow-card {
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+}
+html.dark .shadow-pop {
+  box-shadow: 0 12px 32px -8px rgba(0, 0, 0, 0.55);
+}
+html.dark input,
+html.dark select,
+html.dark textarea {
+  color-scheme: dark;
+}
+
+/* slim scrollbars */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #d5dae2 transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background: #d5dae2;
+  border-radius: 8px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+@keyframes toast {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.page-enter {
+  animation: fadeUp 0.28s ease-out;
+}
+
+/* ---------- print: receipt only ---------- */
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  #receipt-print,
+  #receipt-print * {
+    visibility: visible;
+  }
+  #receipt-print {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    box-shadow: none;
+    border: none;
+  }
+}
