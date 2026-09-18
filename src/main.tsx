@@ -11,3 +11,12 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
     </ToastProvider>
   </React.StrictMode>
 );
+
+/* PWA: register the offline service worker (production only). */
+if ("serviceWorker" in navigator && new URLSearchParams(location.search).get("nopwa") !== "1") {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/sw.js").catch(() => {
+      /* offline mode unavailable — app still works normally */
+    });
+  });
+}

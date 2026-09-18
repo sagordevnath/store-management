@@ -1,6 +1,9 @@
-import { useState } from "react";
+import { Suspense, lazy, useState } from "react";
 import { Button, Field, TextInput } from "../ui";
 import { IcStore, IcCheck } from "../icons";
+
+// Three.js hero is code-split so the main bundle stays lean.
+const LoginHero3D = lazy(() => import("../three/LoginHero3D"));
 
 export function LoginPage({ onLogin, shopName }: { onLogin: () => void; shopName: string }) {
   const [email, setEmail] = useState("owner@brightleaf.market");
@@ -25,6 +28,10 @@ export function LoginPage({ onLogin, shopName }: { onLogin: () => void; shopName
     <div className="flex min-h-full flex-col lg:flex-row">
       {/* Left brand panel */}
       <div className="relative hidden flex-1 flex-col justify-between overflow-hidden bg-ink-950 p-12 text-white lg:flex">
+        {/* Interactive 3D scene: drag to spin. Sits behind the copy. */}
+        <Suspense fallback={null}>
+          <LoginHero3D className="absolute inset-0 opacity-70" />
+        </Suspense>
         <div className="pointer-events-none absolute -left-24 -top-24 h-96 w-96 rounded-full bg-brand-500/25 blur-3xl" />
         <div className="pointer-events-none absolute -bottom-32 -right-16 h-[28rem] w-[28rem] rounded-full bg-brand-400/15 blur-3xl" />
         <div className="relative flex items-center gap-2.5">
@@ -36,7 +43,7 @@ export function LoginPage({ onLogin, shopName }: { onLogin: () => void; shopName
             <p className="text-xs text-white/55">Business Manager</p>
           </div>
         </div>
-        <div className="relative max-w-md">
+        <div className="relative z-10 max-w-md">
           <h1 className="text-3xl font-extrabold leading-tight">
             Run your entire shop from one professional dashboard.
           </h1>
@@ -60,7 +67,7 @@ export function LoginPage({ onLogin, shopName }: { onLogin: () => void; shopName
             ))}
           </ul>
         </div>
-        <p className="relative text-xs text-white/40">
+        <p className="relative z-10 text-xs text-white/40">
           © 2026 Managix · Trusted by thousands of retail shops worldwide
         </p>
       </div>

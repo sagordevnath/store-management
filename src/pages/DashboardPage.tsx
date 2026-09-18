@@ -1,6 +1,6 @@
-import { useMemo, useState } from "react";
+import { Suspense, lazy, useMemo, useState } from "react";
 import { useApp } from "../App";
-import { computeKpis, customerDue, supplierDue } from "../lib/store";
+import { computeKpis, customerDue, supplierDue, reorderList, expiringProducts } from "../lib/store";
 import { fmtMoney, fmtCompact, initials, classNames, downloadCSV } from "../lib/helpers";
 import { syncEngine } from "../lib/sync";
 import { hasFeature } from "../lib/plans";
@@ -16,6 +16,9 @@ import {
   type PeriodKey,
 } from "../lib/period";
 import { AreaChart, BarChartH, Badge, Button, Card, CardHeader, Modal, Segmented, Th, Td } from "../ui";
+
+// 3D revenue chart is code-split so it loads only when used.
+const Bar3DChart = lazy(() => import("../three/Bar3DChart"));
 import {
   IcCart, IcCash, IcBox, IcUsers, IcWallet, IcDownload, IcPlus,
   IcTrend, IcReceipt, IcRefresh,
@@ -33,6 +36,7 @@ export default function DashboardPage() {
   const kpis = useMemo(() => computeKpis(db), [db, refreshTick]);
   const m = useMemo(() => periodMetrics(db, period), [db, period, refreshTick]);
   const series = useMemo(() => revenueSeries(db, period), [db, period, refreshTick]);
+  const [chartMode, setChartMode] = useState<"2d" | "3d">("3d");
   const top = useMemo(() => topProductsInRange(db, periodRangeStart(period), new Date(), 6), [db, period, refreshTick]);
   const cats = useMemo(() => categorySlice(db, period, 6), [db, period, refreshTick]);
 
@@ -40,6 +44,7 @@ export default function DashboardPage() {
   const canTarget = hasFeature(sub, "target_progress");
   const canForecast = hasFeature(sub, "cashflow_forecast");
   const canInsight = hasFeature(sub, "ai_insight");
+  const canReorder = hasFeature(sub, "smart_reorder");
 
   const forecast = useMemo(() => (canForecast ? forecastCashflow(db, 14) : []), [db, canForecast, refreshTick]);
   const insight = useMemo(() => (canInsight ? generateInsight(db, db.settings.monthlyTarget) : ""), [db, canInsight, refreshTick]);
@@ -114,6 +119,9 @@ export default function DashboardPage() {
     () => db.products.filter((p) => p.stock <= p.lowStockAt).sort((a, b) => a.stock - b.stock).slice(0, 6),
     [db, refreshTick]
   );
+
+  const expiring = useMemo(() => expiringProducts(db, 45).slice(0, 5), [db, refreshTick]);
+  const reorder = useMemo(() => reorderList(db, 7).slice(0, 5), [db, refreshTick]);
   const dues = useMemo(
     () =>
       db.customers
@@ -243,6 +251,7 @@ export default function DashboardPage() {
         <QuickAction icon={<IcCart size={15} />} label="New Purchase" onClick={() => navigate("purchases")} />
         <QuickAction icon={<IcWallet size={15} />} label="Add Expense" onClick={() => navigate("expenses")} />
         <QuickAction icon={<IcUsers size={15} />} label="Collect Due" onClick={() => navigate("customers")} />
+        <QuickAction icon={<IcRefresh size={15} />} label="Process Return" onClick={() => navigate("returns")} />
       </div>
 
       {/* ===== Draggable Phase-2 widgets ===== */}
@@ -261,7 +270,23 @@ export default function DashboardPage() {
                   }
                 />
                 <div className="px-4 pb-4 pt-2">
-                  <AreaChart data={series} formatY={(v) => fmtCompact(v, currency)} />
+                  <div className="mb-2 flex justify-end">
+                    <Segmented
+                      options={[
+                        { value: "2d", label: "2D" },
+                        { value: "3d", label: "3D" },
+                      ]}
+                      value={chartMode}
+                      onChange={(v) => setChartMode(v)}
+                    />
+                  </div>
+                  {chartMode === "3d" ? (
+                    <Suspense fallback={<div style={{ height: 260 }} className="animate-pulse rounded-lg bg-ink-100" />}>
+                      <Bar3DChart data={series} formatValue={(v) => fmtMoney(v, currency)} height={260} />
+                    </Suspense>
+                  ) : (
+                    <AreaChart data={series} formatY={(v) => fmtCompact(v, currency)} />
+                  )}
                 </div>
               </Card>
 
@@ -406,7 +431,70 @@ export default function DashboardPage() {
           </Card>
 
           <Card>
-            <CardHeader title="Top dues to collect" subtitle="Customers who owe the most" />
+            <CardHeader
+              title="Smart reorder"
+              subtitle="Velocity-based suggestions (Pro)"
+              action={
+                canReorder && reorder.length ? (
+                  <Button variant="ghost" size="sm" onClick={() => navigate("purchases")}>Draft PO →</Button>
+                ) : undefined
+              }
+            />
+            <div className="divide-y divide-ink-100">
+              {!canReorder ? (
+                <p className="px-5 py-6 text-center text-sm text-ink-400">
+                  Smart reorder is a Pro feature —{" "}
+                  <button className="font-medium text-brand-600 underline" onClick={() => navigate("billing")}>compare plans</button>.
+                </p>
+              ) : reorder.length === 0 ? (
+                <p className="px-5 py-6 text-center text-sm text-ink-400">Stock levels look healthy. Nothing to reorder.</p>
+              ) : (
+                reorder.map((r) => (
+                  <div key={r.product.id} className="flex items-center justify-between px-5 py-2.5">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium text-ink-800">{r.product.name}</p>
+                      <p className="text-xs text-ink-400">
+                        {r.daysCover === null ? "No sales velocity" : `${r.daysCover} days of cover left`}
+                      </p>
+                    </div>
+                    <Badge tone={r.daysCover !== null && r.daysCover < 3 ? "red" : "amber"}>+{r.suggestQty}</Badge>
+                  </div>
+                ))
+              )}
+            </div>
+          </Card>
+
+          <Card>
+            <CardHeader
+              title="Expiring soon"
+              subtitle="Batch expiry within 45 days"
+              action={expiring.length ? <Button variant="ghost" size="sm" onClick={() => navigate("products")}>Review →</Button> : undefined}
+            />
+            <div className="divide-y divide-ink-100">
+              {expiring.length === 0 ? (
+                <p className="px-5 py-6 text-center text-sm text-ink-400">No expiry-tracked items are close to expiry.</p>
+              ) : (
+                expiring.map(({ product: p, daysLeft }) => (
+                  <div key={p.id} className="flex items-center justify-between px-5 py-2.5">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium text-ink-800">{p.name}</p>
+                      <p className="text-xs text-ink-400">{p.stock} {p.unit} in stock</p>
+                    </div>
+                    <Badge tone={daysLeft <= 0 ? "red" : daysLeft <= 14 ? "amber" : "neutral"}>
+                      {daysLeft <= 0 ? "Expired" : `${daysLeft}d left`}
+                    </Badge>
+                  </div>
+                ))
+              )}
+            </div>
+          </Card>
+
+          <Card>
+            <CardHeader
+              title="Top dues to collect"
+              subtitle="Customers who owe the most"
+              action={dues.length ? <Button variant="ghost" size="sm" onClick={() => navigate("customers")}>Collect →</Button> : undefined}
+            />
             <div className="divide-y divide-ink-100">
               {dues.length === 0 ? (
                 <p className="px-5 py-6 text-center text-sm text-ink-400">No outstanding dues. Excellent!</p>

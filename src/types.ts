@@ -30,9 +30,61 @@ export interface Product {
   lowStockAlert?: boolean; // master switch for low-stock alerts
   vatIncluded?: boolean; // price already includes VAT — don't tax again
   discountable?: boolean; // eligible for discounts
+  /* --- Phase 4 --- */
+  priceTier?: Partial<Record<PriceTier, number>>; // wholesale/distributor price overrides
+  trackExpiry?: boolean; // capture batch + expiry on purchases
+  expiryDate?: string | null; // latest known expiry (manual or from last batch)
+  shelfLifeDays?: number; // used to prefill expiry = today + shelfLife
 }
 
 export type PaymentMethod = "Cash" | "Card" | "Mobile Money" | "Due";
+
+/* ---------------- Phase 4: price tiers (retail → wholesale → distribution) ---------------- */
+
+export type PriceTier = "retail" | "wholesale" | "distributor";
+
+export interface SaleReturnItem {
+  productId: ID;
+  name: string;
+  qty: number;
+  unitPrice: number;
+  reason: string;
+}
+
+/** A customer return against a sales invoice. */
+export interface SaleReturn {
+  id: ID;
+  no: string; // RET-1001
+  saleId: ID;
+  invoiceNo: string;
+  at: string;
+  items: SaleReturnItem[];
+  amount: number; // refund value (item prices × qty)
+  refundMethod: "Cash refund" | "Store credit" | "Adjust due";
+  restock: boolean;
+  note: string;
+}
+
+/** A return to a supplier against a purchase order. */
+export interface PurchaseReturn {
+  id: ID;
+  no: string; // PRET-1001
+  purchaseId: ID;
+  refNo: string;
+  at: string;
+  items: SaleReturnItem[]; // unitPrice holds the unit cost
+  amount: number;
+  creditNote: boolean; // supplier credit / payable reduction vs cash refund
+  note: string;
+}
+
+/** Branch / outlet for multi-location businesses. */
+export interface Branch {
+  id: ID;
+  name: string;
+  address: string;
+  createdAt: string;
+}
 
 export interface SaleItem {
   productId: ID;
@@ -73,6 +125,11 @@ export interface Sale {
   paidAmount: number;
   signature?: string | null; // dataURL of drawn e-signature
   delivery?: DeliveryTrack | null;
+  /* --- Phase 4 --- */
+  branchId?: ID | null;
+  priceTier?: PriceTier; // tier applied at sale time
+  pointsEarned?: number; // loyalty points granted by this sale
+  pointsRedeemed?: number; // loyalty points spent on this sale
 }
 
 export interface Purchase {
@@ -87,6 +144,7 @@ export interface Purchase {
   payment: "Paid" | "Due";
   paidAmount: number;
   note: string;
+  branchId?: ID | null;
 }
 
 export interface Customer {
@@ -96,6 +154,10 @@ export interface Customer {
   address: string;
   openingDue: number;
   createdAt: string;
+  /* --- Phase 4 --- */
+  tier: PriceTier; // drives POS pricing
+  creditLimit: number; // 0 = no credit sales allowed
+  points: number; // loyalty balance
 }
 
 export interface Supplier {
@@ -123,6 +185,7 @@ export interface Expense {
   category: ExpenseCategory;
   description: string;
   amount: number;
+  branchId?: ID | null;
 }
 
 export interface StaffMember {
@@ -182,6 +245,10 @@ export interface Settings {
   ownerName: string;
   monthlyTarget: number; // sales target for dashboard
   branches: number;
+  /* --- Phase 4 --- */
+  loyaltyEnabled: boolean;
+  loyaltyRate: number; // points earned per 100 spent
+  pointValue: number; // currency value of one point when redeeming
 }
 
 export interface DB {
@@ -196,4 +263,8 @@ export interface DB {
   subscription: Subscription;
   subInvoices: SubInvoice[];
   settings: Settings;
+  /* --- Phase 4 --- */
+  saleReturns: SaleReturn[];
+  purchaseReturns: PurchaseReturn[];
+  branches: Branch[];
 }

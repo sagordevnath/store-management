@@ -1,11 +1,12 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useApp } from "../App";
 import type { Purchase } from "../types";
-import { makePurchase, paySupplier, nextRefNo } from "../lib/store";
+import { makePurchase, paySupplier, nextRefNo, reorderList } from "../lib/store";
 import { fmtMoney, fmtDateTime, uid } from "../lib/helpers";
 import { Badge, Button, Card, Field, Modal, NumberInput, Select, TextArea, TextInput, useToast, Th, Td, EmptyState } from "../ui";
-import { IcPlus, IcSearch, IcDownload, IcTrash, IcCash } from "../icons";
+import { IcPlus, IcSearch, IcDownload, IcTrash, IcCash, IcRefresh } from "../icons";
 import { downloadCSV } from "../lib/helpers";
+import { PurchaseReturnModal } from "./ReturnsPage";
 
 export default function PurchasesPage() {
   const { db, update, currency } = useApp();
@@ -15,6 +16,8 @@ export default function PurchasesPage() {
   const [detail, setDetail] = useState<Purchase | null>(null);
   const [payFor, setPayFor] = useState<Purchase | null>(null);
   const [amount, setAmount] = useState(0);
+  const [returnPo, setReturnPo] = useState<Purchase | null>(null);
+  const [reorderPrefill, setReorderPrefill] = useState(false);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -45,6 +48,13 @@ export default function PurchasesPage() {
         <div className="flex gap-2">
           <Button
             variant="secondary"
+            onClick={() => { setReorderPrefill(true); setCreating(true); }}
+            title="Prefill from smart reorder suggestions"
+          >
+            <IcRefresh size={15} /> Reorder suggestions
+          </Button>
+          <Button
+            variant="secondary"
             onClick={() =>
               downloadCSV("purchases.csv", [
                 ["Ref", "Date", "Supplier", "Items", "Subtotal", "Shipping", "Total", "Paid", "Due"],
@@ -59,7 +69,7 @@ export default function PurchasesPage() {
           >
             <IcDownload size={15} /> Export
           </Button>
-          <Button onClick={() => setCreating(true)}><IcPlus size={16} /> New purchase</Button>
+          <Button onClick={() => { setReorderPrefill(false); setCreating(true); }}><IcPlus size={16} /> New purchase</Button>
         </div>
       </div>
 
@@ -114,7 +124,11 @@ export default function PurchasesPage() {
         )}
       </Card>
 
-      <CreatePurchaseModal open={creating} onClose={() => setCreating(false)} />
+      <CreatePurchaseModal open={creating} onClose={() => setCreating(false)} prefill={reorderPrefill} />
+
+      {returnPo ? (
+        <PurchaseReturnModal purchase={returnPo} onClose={() => setReturnPo(null)} onDone={(m) => { toast(m); setReturnPo(null); }} />
+      ) : null}
 
       <Modal
         open={!!detail}
@@ -127,6 +141,11 @@ export default function PurchasesPage() {
             {detail && detail.total - detail.paidAmount > 0.009 ? (
               <Button variant="success" onClick={() => { setPayFor(detail); setAmount(round2(detail.total - detail.paidAmount)); setDetail(null); }}>
                 <IcCash size={15} /> Pay supplier
+              </Button>
+            ) : null}
+            {detail ? (
+              <Button variant="danger" onClick={() => { setReturnPo(detail); setDetail(null); }}>
+                <IcRefresh size={15} /> Return to supplier
               </Button>
             ) : null}
           </div>
@@ -187,7 +206,7 @@ export default function PurchasesPage() {
   );
 }
 
-function CreatePurchaseModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+function CreatePurchaseModal({ open, onClose, prefill }: { open: boolean; onClose: () => void; prefill?: boolean }) {
   const { db, update, currency } = useApp();
   const toast = useToast();
   const [supplierId, setSupplierId] = useState("");
@@ -195,10 +214,22 @@ function CreatePurchaseModal({ open, onClose }: { open: boolean; onClose: () => 
   const [paidInput, setPaidInput] = useState(0);
   const [shipping, setShipping] = useState(0);
   const [note, setNote] = useState("");
-  const [lines, setLines] = useState<{ productId: string; unitCost: number; qty: number }[]>([]);
+  const [lines, setLines] = useState<{ productId: string; unitCost: number; qty: number; batch?: string; expiry?: string }[]>([]);
+
+  // Prefill from the smart-reorder engine each time the modal opens in prefill mode.
+  useEffect(() => {
+    if (open && prefill) {
+      setLines(
+        reorderList(db).slice(0, 10).map((r) => ({ productId: r.product.id, unitCost: r.product.cost, qty: r.suggestQty })),
+      );
+    }
+    if (!open) setLines([]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, prefill]);
 
   const subtotal = round2(lines.reduce((s, l) => s + l.unitCost * l.qty, 0));
   const total = round2(subtotal + shipping);
+  const expiryTracked = lines.some((l) => db.products.find((p) => p.id === l.productId)?.trackExpiry);
 
   const addLine = () => {
     const first = db.products.find((p) => !lines.some((l) => l.productId === p.id));
@@ -216,7 +247,18 @@ function CreatePurchaseModal({ open, onClose }: { open: boolean; onClose: () => 
       paidAmount: payment === "Paid" ? total : paidInput,
       note,
     });
-    update(() => next);
+    // Stamp expiry for expiry-tracked products from the latest batch entered.
+    let withExpiry = next;
+    for (const l of lines) {
+      const p = db.products.find((x) => x.id === l.productId);
+      if (p?.trackExpiry && l.expiry) {
+        withExpiry = {
+          ...withExpiry,
+          products: withExpiry.products.map((pp) => (pp.id === l.productId ? { ...pp, expiryDate: l.expiry! } : pp)),
+        };
+      }
+    }
+    update(() => withExpiry);
     toast(`Purchase ${purchase.refNo} recorded — stock updated`);
     setLines([]);
     setShipping(0);
@@ -230,7 +272,7 @@ function CreatePurchaseModal({ open, onClose }: { open: boolean; onClose: () => 
     <Modal
       open={open}
       onClose={onClose}
-      title="New purchase order"
+      title={prefill ? "New purchase order — smart reorder" : "New purchase order"}
       wide
       footer={
         <div className="flex justify-between">
@@ -272,40 +314,63 @@ function CreatePurchaseModal({ open, onClose }: { open: boolean; onClose: () => 
                 Add products you are purchasing. Stock and cost price update automatically.
               </p>
             ) : (
-              lines.map((l, i) => (
-                <div key={i} className="flex items-center gap-2 rounded-lg border border-ink-200 p-2">
-                  <Select
-                    value={l.productId}
-                    className="min-w-0 flex-1"
-                    onChange={(e) => {
-                      const pid = e.target.value;
-                      const p = db.products.find((x) => x.id === pid)!;
-                      setLines((ls) => ls.map((x, j) => (j === i ? { ...x, productId: pid, unitCost: p.cost } : x)));
-                    }}
-                  >
-                    {db.products.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-                  </Select>
-                  <NumberInput
-                    value={l.unitCost}
-                    min={0}
-                    step="0.01"
-                    className="w-24"
-                    onChange={(e) => setLines((ls) => ls.map((x, j) => (j === i ? { ...x, unitCost: Number(e.target.value) || 0 } : x)))}
-                  />
-                  <NumberInput
-                    value={l.qty}
-                    min={1}
-                    className="w-20"
-                    onChange={(e) => setLines((ls) => ls.map((x, j) => (j === i ? { ...x, qty: Number(e.target.value) || 0 } : x)))}
-                  />
-                  <span className="w-24 text-right text-sm font-medium">{fmtMoney(l.unitCost * l.qty, currency)}</span>
-                  <button className="text-ink-300 hover:text-red-500" onClick={() => setLines((ls) => ls.filter((_, j) => j !== i))}>
-                    <IcTrash size={14} />
-                  </button>
-                </div>
-              ))
+              lines.map((l, i) => {
+                const p = db.products.find((x) => x.id === l.productId);
+                return (
+                  <div key={i} className="rounded-lg border border-ink-200 p-2">
+                    <div className="flex items-center gap-2">
+                      <Select
+                        value={l.productId}
+                        className="min-w-0 flex-1"
+                        onChange={(e) => {
+                          const pid = e.target.value;
+                          const np = db.products.find((x) => x.id === pid)!;
+                          setLines((ls) => ls.map((x, j) => (j === i ? { ...x, productId: pid, unitCost: np.cost } : x)));
+                        }}
+                      >
+                        {db.products.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                      </Select>
+                      <NumberInput
+                        value={l.unitCost}
+                        min={0}
+                        step="0.01"
+                        className="w-24"
+                        onChange={(e) => setLines((ls) => ls.map((x, j) => (j === i ? { ...x, unitCost: Number(e.target.value) || 0 } : x)))}
+                      />
+                      <NumberInput
+                        value={l.qty}
+                        min={1}
+                        className="w-20"
+                        onChange={(e) => setLines((ls) => ls.map((x, j) => (j === i ? { ...x, qty: Number(e.target.value) || 0 } : x)))}
+                      />
+                      <span className="w-24 text-right text-sm font-medium">{fmtMoney(l.unitCost * l.qty, currency)}</span>
+                      <button className="text-ink-300 hover:text-red-500" onClick={() => setLines((ls) => ls.filter((_, j) => j !== i))}>
+                        <IcTrash size={14} />
+                      </button>
+                    </div>
+                    {p?.trackExpiry ? (
+                      <div className="mt-2 flex items-center gap-2 border-t border-dashed border-ink-100 pt-2">
+                        <span className="text-[11px] font-semibold uppercase tracking-wide text-ink-400">Batch / expiry</span>
+                        <TextInput
+                          value={l.batch ?? ""}
+                          onChange={(e) => setLines((ls) => ls.map((x, j) => (j === i ? { ...x, batch: e.target.value } : x)))}
+                          placeholder="Batch no"
+                          className="w-32"
+                        />
+                        <input
+                          type="date"
+                          value={l.expiry ?? ""}
+                          onChange={(e) => setLines((ls) => ls.map((x, j) => (j === i ? { ...x, expiry: e.target.value } : x)))}
+                          className="rounded-lg border border-ink-200 px-2 py-1.5 text-sm"
+                        />
+                      </div>
+                    ) : null}
+                  </div>
+                );
+              })
             )}
           </div>
+          {expiryTracked ? <p className="text-xs text-ink-400">Items with batch/expiry fields update the product's latest expiry automatically.</p> : null}
         </div>
 
         {payment === "Due" ? (

@@ -9,7 +9,7 @@ import { Badge, Button, Card, Modal, ToastProvider, useDarkMode, useToast } from
 import {
   IcDashboard, IcCart, IcBox, IcSale, IcTruck, IcUsers, IcBuilding, IcWallet,
   IcChart, IcStaff, IcSettings, IcSearch, IcLogout, IcStore, IcAlert,
-  IcCategories, IcCrown, IcTools,
+  IcCategories, IcCrown, IcTools, IcRefresh,
 } from "./icons";
 import DashboardPage from "./pages/DashboardPage";
 import PosPage from "./pages/PosPage";
@@ -25,6 +25,7 @@ import SettingsPage from "./pages/SettingsPage";
 import CategoriesPage from "./pages/CategoriesPage";
 import BillingPage from "./pages/BillingPage";
 import ToolsPage from "./pages/ToolsPage";
+import ReturnsPage from "./pages/ReturnsPage";
 import SuperAdminPage from "./pages/SuperAdminPage";
 import SupportChat from "./pages/SupportChat";
 import { LoginPage } from "./pages/LoginPage";
@@ -32,13 +33,14 @@ import { LoginPage } from "./pages/LoginPage";
 export type PageKey =
   | "dashboard" | "pos" | "products" | "categories" | "sales" | "purchases"
   | "customers" | "suppliers" | "expenses" | "reports" | "staff" | "settings"
-  | "billing" | "tools";
+  | "billing" | "tools" | "returns";
 
 const NAV: { key: PageKey; label: string; icon: (p: { size?: number; className?: string }) => React.ReactNode; group: string }[] = [
   { key: "dashboard", label: "Dashboard", icon: IcDashboard, group: "Overview" },
   { key: "pos", label: "Point of Sale", icon: IcCart, group: "Daily Operations" },
   { key: "sales", label: "Sales & Invoices", icon: IcSale, group: "Daily Operations" },
   { key: "purchases", label: "Purchases", icon: IcTruck, group: "Daily Operations" },
+  { key: "returns", label: "Returns & Refunds", icon: IcRefresh, group: "Daily Operations" },
   { key: "products", label: "Products & Stock", icon: IcBox, group: "Catalog" },
   { key: "categories", label: "Categories", icon: IcCategories, group: "Catalog" },
   { key: "customers", label: "Customers", icon: IcUsers, group: "People" },
@@ -356,6 +358,7 @@ function Shell({
             {page === "categories" && <CategoriesPage />}
             {page === "sales" && <SalesPage />}
             {page === "purchases" && <PurchasesPage />}
+            {page === "returns" && <ReturnsPage />}
             {page === "customers" && <CustomersPage />}
             {page === "suppliers" && <SuppliersPage />}
             {page === "expenses" && <ExpensesPage />}

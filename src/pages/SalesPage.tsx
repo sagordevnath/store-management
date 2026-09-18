@@ -4,8 +4,9 @@ import type { Sale } from "../types";
 import { collectDue, customerDueList } from "../lib/store";
 import { fmtMoney, fmtDateTime, downloadCSV } from "../lib/helpers";
 import { Badge, Button, Card, Field, Modal, NumberInput, Select, TextInput, useToast, Th, Td, EmptyState } from "../ui";
-import { IcSearch, IcDownload, IcPrint, IcCash } from "../icons";
+import { IcSearch, IcDownload, IcPrint, IcCash, IcRefresh } from "../icons";
 import { Receipt } from "./PosPage";
+import { SaleReturnModal } from "./ReturnsPage";
 
 type Filter = "all" | "due" | "paid";
 
@@ -19,6 +20,7 @@ export default function SalesPage() {
   const [collectFor, setCollectFor] = useState<Sale | null>(null);
   const [amount, setAmount] = useState(0);
   const [receiptFor, setReceiptFor] = useState<Sale | null>(null);
+  const [returnFor, setReturnFor] = useState<Sale | null>(null);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -152,6 +154,7 @@ export default function SalesPage() {
               <Button variant="success" onClick={() => { openCollect(detail); setDetail(null); }}><IcCash size={15} /> Collect due</Button>
             ) : null}
             <Button onClick={() => { setReceiptFor(detail); setDetail(null); }}><IcPrint size={15} /> Receipt</Button>
+            <Button variant="danger" onClick={() => { setReturnFor(detail); setDetail(null); }}><IcRefresh size={15} /> Return items</Button>
           </div>
         }
       >
@@ -219,6 +222,11 @@ export default function SalesPage() {
       }>
         {receiptFor ? <Receipt sale={receiptFor} shopName={db.settings.shopName} currency={currency} /> : null}
       </Modal>
+
+      {/* Return items */}
+      {returnFor ? (
+        <SaleReturnModal sale={returnFor} onClose={() => setReturnFor(null)} onDone={(m) => { toast(m); setReturnFor(null); }} />
+      ) : null}
     </div>
   );
 }

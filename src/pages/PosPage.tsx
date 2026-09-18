@@ -1,11 +1,11 @@
 import { useMemo, useState } from "react";
 import { useApp } from "../App";
 import type { CartLine } from "../lib/store";
-import { makeSale, nextInvoiceNo } from "../lib/store";
+import { makeSale, nextInvoiceNo, priceForTier, pointsEarnedFor } from "../lib/store";
 import { fmtMoney, round2 } from "../lib/helpers";
 import { hasFeature } from "../lib/plans";
 import { productsInSubtree } from "../lib/categories";
-import type { Sale } from "../types";
+import type { Sale, PriceTier } from "../types";
 import { Badge, Button, Card, CategoryChips, Field, Modal, NumberInput, Select, SignPad, TextArea, TextInput, VoiceButton, useToast } from "../ui";
 import { IcSearch, IcPlus, IcTrash, IcPrint, IcCart, IcCheck, IcCash } from "../icons";
 
@@ -27,9 +27,20 @@ export default function PosPage() {
   const [note, setNote] = useState("");
   const [lastSale, setLastSale] = useState<Sale | null>(null);
   const [receiptOpen, setReceiptOpen] = useState(false);
+  const [tierOverride, setTierOverride] = useState<PriceTier | null>(null); // null = follow customer
+  const [redeemInput, setRedeemInput] = useState(0);
+  const [branchId, setBranchId] = useState<string>(db.branches[0]?.id ?? "");
 
   const sub = db.subscription;
   const showChips = hasFeature(sub, "categories_nested");
+  const tiersEnabled = hasFeature(sub, "price_tiers");
+  const loyaltyOn = db.settings.loyaltyEnabled && hasFeature(sub, "loyalty");
+  const activeTier: PriceTier = useMemo(() => {
+    if (tierOverride) return tierOverride;
+    const c = db.customers.find((x) => x.id === customerId);
+    return c?.tier ?? "retail";
+  }, [tierOverride, customerId, db.customers]);
+  const selectedCustomer = db.customers.find((c) => c.id === customerId) ?? null;
   const allowedIds = useMemo(
     () => (category ? productsInSubtree(db, category) : null),
     [db, category],
@@ -60,9 +71,17 @@ export default function PosPage() {
   const total = round2(subtotal - discount + tax);
   const anyDiscountable = cart.some((l) => db.products.find((x) => x.id === l.productId)?.discountable !== false);
 
+  // Loyalty: redeemable points → credit (1 point = settings.pointValue)
+  const discountedBase = round2(Math.max(0, subtotal - discount));
+  const redeemablePoints = loyaltyOn && selectedCustomer ? Math.min(selectedCustomer.points, Math.floor(discountedBase / Math.max(db.settings.pointValue, 0.0001))) : 0;
+  const maxRedeemCredit = round2(redeemablePoints * db.settings.pointValue);
+  const redeemCredit = round2(Math.min(redeemInput * db.settings.pointValue, maxRedeemCredit));
+  const finalTotal = round2(Math.max(0, discountedBase + tax - redeemCredit));
+
   const addToCart = (productId: string) => {
     const p = db.products.find((x) => x.id === productId);
     if (!p) return;
+    const unitPrice = priceForTier(p, activeTier);
     setCart((prev) => {
       const existing = prev.find((l) => l.productId === productId);
       if (existing) {
@@ -72,7 +91,7 @@ export default function PosPage() {
         }
         return prev.map((l) => (l.productId === productId ? { ...l, qty: l.qty + 1 } : l));
       }
-      return [...prev, { productId, name: p.name, unitPrice: p.price, qty: 1, discount: 0 }];
+      return [...prev, { productId, name: p.name, unitPrice, qty: 1, discount: 0 }];
     });
   };
 
@@ -87,9 +106,19 @@ export default function PosPage() {
     );
   };
 
+  const customerCurrentDue = useMemo(() => {
+    if (!selectedCustomer) return 0;
+    let due = selectedCustomer.openingDue;
+    for (const s of db.sales) {
+      if (s.customerId === selectedCustomer.id && s.payment === "Due") due += s.total - s.paidAmount;
+    }
+    return round2(due);
+  }, [selectedCustomer, db.sales]);
+
   const completeSale = () => {
     if (cart.length === 0) return;
     const isDue = payment === "Due";
+    const pts = loyaltyOn && selectedCustomer ? Math.min(redeemInput, redeemablePoints) : 0;
     const { db: next, sale } = makeSale(db, {
       items: cart,
       payment,
@@ -97,12 +126,20 @@ export default function PosPage() {
       discount: orderDiscount,
       taxRate: db.settings.taxRate,
       shipping: 0,
-      paidAmount: isDue ? paidInput : total,
+      paidAmount: isDue ? paidInput : finalTotal,
       note,
       cashier: db.settings.ownerName,
       signature,
+      branchId,
+      priceTier: activeTier,
+      pointsRedeemed: pts,
     });
-    update(() => next);
+    let finalDb = next;
+    if (pts > 0 && customerId) {
+      // Redeemed points were not consumed by makeSale — deduct them here.
+      finalDb = { ...next, customers: next.customers.map((c) => (c.id === customerId ? { ...c, points: Math.max(0, c.points - pts) } : c)) };
+    }
+    update(() => finalDb);
     setLastSale(sale);
     setCart([]);
     setOrderDiscount(0);
@@ -111,6 +148,8 @@ export default function PosPage() {
     setCustomerId("");
     setPayment("Cash");
     setSignature(null);
+    setTierOverride(null);
+    setRedeemInput(0);
     setCheckoutOpen(false);
     setReceiptOpen(true);
     toast(`Sale ${sale.invoiceNo} completed`);
@@ -243,10 +282,13 @@ export default function PosPage() {
             ) : null}
             <div className="flex items-center justify-between border-t border-dashed border-ink-200 pt-2 text-base font-bold text-ink-900">
               <span>Total</span>
-              <span>{fmtMoney(total, currency)}</span>
+              <span>{fmtMoney(finalTotal, currency)}</span>
             </div>
-            <Button className="mt-2 w-full" size="lg" disabled={cart.length === 0} onClick={() => { setCheckoutOpen(true); setPaidInput(total); }}>
-              <IcCheck size={16} /> Charge {fmtMoney(total, currency)}
+            {activeTier !== "retail" ? (
+              <p className="text-xs font-medium text-brand-600">{activeTier === "wholesale" ? "Wholesale" : "Distributor"} pricing applied</p>
+            ) : null}
+            <Button className="mt-2 w-full" size="lg" disabled={cart.length === 0} onClick={() => { setCheckoutOpen(true); setPaidInput(finalTotal); }}>
+              <IcCheck size={16} /> Charge {fmtMoney(finalTotal, currency)}
             </Button>
           </div>
         </Card>
@@ -276,8 +318,46 @@ export default function PosPage() {
         <div className="space-y-4">
           <div className="rounded-xl bg-ink-50 px-4 py-3 text-center">
             <p className="text-xs text-ink-500">Amount due</p>
-            <p className="text-2xl font-bold text-ink-900">{fmtMoney(total, currency)}</p>
+            <p className="text-2xl font-bold text-ink-900">{fmtMoney(finalTotal, currency)}</p>
           </div>
+
+          {tiersEnabled ? (
+            <Field label="Price tier" hint={selectedCustomer ? `${selectedCustomer.name}'s default tier: ${selectedCustomer.tier}` : "Select a customer to apply their tier automatically"}>
+              <div className="grid grid-cols-3 gap-2">
+                {(["retail", "wholesale", "distributor"] as PriceTier[]).map((t) => (
+                  <button
+                    key={t}
+                    onClick={() => { setTierOverride(t); setCart((prev) => prev.map((l) => {
+                      const p = db.products.find((x) => x.id === l.productId);
+                      return p ? { ...l, unitPrice: priceForTier(p, t) } : l;
+                    })); }}
+                    className={
+                      activeTier === t
+                        ? "rounded-lg border-2 border-brand-600 bg-brand-50 px-2 py-2 text-xs font-semibold capitalize text-brand-700"
+                        : "rounded-lg border border-ink-200 bg-white px-2 py-2 text-xs font-medium capitalize text-ink-600 hover:bg-ink-50"
+                    }
+                  >
+                    {t}
+                  </button>
+                ))}
+              </div>
+            </Field>
+          ) : null}
+
+          {loyaltyOn && selectedCustomer ? (
+            <div className="rounded-xl border border-violet-200 bg-violet-50/60 px-4 py-3">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-violet-700">Loyalty points</p>
+                  <p className="text-sm text-ink-600">{selectedCustomer.name} has <b>{selectedCustomer.points}</b> pts ({fmtMoney(round2(selectedCustomer.points * db.settings.pointValue), currency)} credit)</p>
+                </div>
+                <div className="w-28">
+                  <NumberInput value={redeemInput} min={0} max={redeemablePoints} onChange={(e) => setRedeemInput(Math.min(Number(e.target.value) || 0, redeemablePoints))} placeholder="Points" />
+                </div>
+              </div>
+              {redeemCredit > 0 ? <p className="mt-1.5 text-xs font-medium text-violet-700">− {fmtMoney(redeemCredit, currency)} applied from {redeemInput} points</p> : null}
+            </div>
+          ) : null}
 
           <Field label="Payment method">
             <div className="grid grid-cols-2 gap-2">
@@ -309,9 +389,20 @@ export default function PosPage() {
                 </Select>
               </Field>
               <Field label="Paid now (rest becomes due)">
-                <NumberInput value={paidInput} min={0} max={total} onChange={(e) => setPaidInput(Number(e.target.value) || 0)} />
+                <NumberInput value={paidInput} min={0} max={finalTotal} onChange={(e) => setPaidInput(Number(e.target.value) || 0)} />
               </Field>
             </div>
+          ) : null}
+
+          {payment === "Due" && selectedCustomer && selectedCustomer.creditLimit > 0 && (finalTotal - paidInput) > selectedCustomer.creditLimit - round2(customerCurrentDue) ? (
+            <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700">
+              ⚠ Credit limit: {selectedCustomer.name} has {fmtMoney(customerCurrentDue, currency)} outstanding of a {fmtMoney(selectedCustomer.creditLimit, currency)} limit — this sale would exceed it.
+            </p>
+          ) : null}
+          {payment === "Due" && selectedCustomer && selectedCustomer.creditLimit === 0 ? (
+            <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700">
+              {selectedCustomer.name} has no credit limit set — allow credit sales from the customer's profile.
+            </p>
           ) : null}
 
           <div className="grid grid-cols-2 gap-3">
@@ -324,7 +415,7 @@ export default function PosPage() {
               />
             </Field>
             <Field label="Customer (optional)">
-              <Select value={customerId} onChange={(e) => setCustomerId(e.target.value)} disabled={payment === "Due"}>
+              <Select value={customerId} onChange={(e) => { setCustomerId(e.target.value); setTierOverride(null); setRedeemInput(0); }} disabled={payment === "Due"}>
                 <option value="">Walk-in customer</option>
                 {db.customers.map((c) => (
                   <option key={c.id} value={c.id}>{c.name}</option>
@@ -332,6 +423,14 @@ export default function PosPage() {
               </Select>
             </Field>
           </div>
+
+          {db.branches.length > 1 ? (
+            <Field label="Branch">
+              <Select value={branchId} onChange={(e) => setBranchId(e.target.value)}>
+                {db.branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+              </Select>
+            </Field>
+          ) : null}
 
           <Field label="Note">
             <TextArea rows={2} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Optional note on the invoice" />

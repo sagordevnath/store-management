@@ -10,13 +10,19 @@ import { IcPlus, IcSearch, IcEdit, IcTrash, IcDownload, IcBox } from "../icons";
 
 const UNITS = ["pcs", "kg", "g", "litre", "ml", "box", "pack", "bag", "bottle", "dozen", "set", "unit"];
 
+function ExpiryBadge({ expiry }: { expiry: string }) {
+  const days = Math.ceil((new Date(expiry).getTime() - Date.now()) / 86400000);
+  if (days > 45) return null;
+  return days <= 0 ? <Badge tone="red">Expired</Badge> : <Badge tone="amber">{days}d left</Badge>;
+}
+
 export default function ProductsPage() {
   const { db, update, currency, navigate } = useApp();
   const toast = useToast();
   const sub = db.subscription;
   const [search, setSearch] = useState("");
   const [cat, setCat] = useState<string | null>(null);
-  const [stockFilter, setStockFilter] = useState<"all" | "low" | "out">("all");
+  const [stockFilter, setStockFilter] = useState<"all" | "low" | "out" | "expiring">("all");
   const [editing, setEditing] = useState<Product | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<Product | null>(null);
   const [restockFor, setRestockFor] = useState<Product | null>(null);
@@ -35,6 +41,11 @@ export default function ProductsPage() {
         if (allowedIds && !allowedIds.has(p.id)) return false;
         if (stockFilter === "low" && !(p.stock > 0 && p.stock <= p.lowStockAt)) return false;
         if (stockFilter === "out" && p.stock > 0) return false;
+        if (stockFilter === "expiring") {
+          if (!p.expiryDate) return false;
+          const days = Math.ceil((new Date(p.expiryDate).getTime() - Date.now()) / 86400000);
+          if (days > 45) return false;
+        }
         return true;
       })
       .sort((a, b) => a.name.localeCompare(b.name));
@@ -79,6 +90,9 @@ export default function ProductsPage() {
       lowStockAlert: true,
       vatIncluded: false,
       discountable: true,
+      trackExpiry: false,
+      expiryDate: null,
+      shelfLifeDays: 0,
     });
   };
 
@@ -90,6 +104,7 @@ export default function ProductsPage() {
           <p className="text-sm text-ink-500">
             {db.products.length} / {productLimit === Infinity ? "∞" : productLimit} products ·{" "}
             {db.products.reduce((s, p) => s + p.stock, 0)} units in stock
+            {db.products.some((p) => p.trackExpiry) ? ` · ${db.products.filter((p) => p.trackExpiry).length} expiry-tracked` : ""}
           </p>
         </div>
         <div className="flex gap-2">
@@ -128,6 +143,7 @@ export default function ProductsPage() {
             <option value="all">All stock</option>
             <option value="low">Low stock</option>
             <option value="out">Out of stock</option>
+            <option value="expiring">Expiring ≤ 45 days</option>
           </Select>
           <span className="ml-auto text-xs text-ink-400">{filtered.length} shown</span>
         </div>
@@ -164,6 +180,7 @@ export default function ProductsPage() {
                             {p.vatIncluded ? <Badge tone="green">VAT in</Badge> : null}
                             {p.forRetailSale === false ? <Badge tone="amber">Not for sale</Badge> : null}
                             {p.warrantyMonths ? <Badge tone="blue">{p.warrantyMonths}m warranty</Badge> : null}
+                            {p.trackExpiry && p.expiryDate ? <ExpiryBadge expiry={p.expiryDate} /> : null}
                           </p>
                           <p className="text-xs text-ink-400">{p.sku}{p.barcode ? ` · ${p.barcode}` : ""}</p>
                         </div>
@@ -398,6 +415,31 @@ function ProductModal({ product, onClose, onSave }: { product: Product; onClose:
           <Field label="Product description">
             <TextArea value={p.description ?? ""} onChange={(e) => set("description", e.target.value)} rows={3} placeholder="Short description shown on invoices and quick view…" />
           </Field>
+        </div>
+
+        {/* Expiry tracking (wholesale / grocery essential) */}
+        <div className="col-span-2 rounded-xl border border-ink-200 p-3">
+          <Toggle
+            checked={!!p.trackExpiry}
+            onChange={(v) => set("trackExpiry", v)}
+            label="Track expiry"
+            hint="Capture batch + expiry on purchases; get expiry alerts on the dashboard"
+          />
+          {p.trackExpiry ? (
+            <div className="mt-3 grid grid-cols-2 gap-3">
+              <Field label="Current expiry date" hint="Updated automatically with each batch">
+                <input
+                  type="date"
+                  value={p.expiryDate ? p.expiryDate.slice(0, 10) : ""}
+                  onChange={(e) => set("expiryDate", e.target.value || null)}
+                  className="w-full rounded-lg border border-ink-200 bg-white px-3 py-2 text-sm text-ink-800 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/25"
+                />
+              </Field>
+              <Field label="Shelf life (days)" hint="Prefills expiry on new batches">
+                <NumberInput value={p.shelfLifeDays ?? 0} min={0} onChange={(e) => set("shelfLifeDays", Number(e.target.value) || 0)} />
+              </Field>
+            </div>
+          ) : null}
         </div>
 
         {/* 9 — Others: toggles */}

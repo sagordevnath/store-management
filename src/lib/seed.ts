@@ -9,6 +9,7 @@ import type {
   SaleItem,
   Purchase,
   Category,
+  Branch,
 } from "../types";
 import { uid, daysAgoISO, round2 } from "./helpers";
 import { TRIAL_DAYS } from "./plans";
@@ -133,6 +134,8 @@ export function buildSeedDB(): DB {
 
   const products: Product[] = PRODUCTS_RAW.map(([name, catId, price, cost, unit, lowAt], i) => {
     const stock = Math.floor(rand() * 60) + (i % 7 === 0 ? 0 : 6);
+    const wholesale = Math.round(price * 0.9 * 100) / 100;
+    const distributor = Math.round(price * 0.82 * 100) / 100;
     return {
       id: `p_${i + 1}`,
       name,
@@ -144,6 +147,13 @@ export function buildSeedDB(): DB {
       lowStockAt: lowAt,
       unit,
       createdAt: daysAgoISO(120 + Math.floor(rand() * 30)),
+      priceTier: { wholesale, distributor },
+      // A few perishables get expiry tracking seeded in
+      trackExpiry: [5, 6, 8, 11].includes(i),
+      expiryDate: [5, 6, 8, 11].includes(i)
+        ? new Date(Date.now() + (12 + Math.floor(rand() * 50)) * 86400000).toISOString()
+        : null,
+      shelfLifeDays: [5, 6, 8, 11].includes(i) ? 90 : 0,
     };
   });
 
@@ -154,6 +164,9 @@ export function buildSeedDB(): DB {
     address: `Street ${10 + i * 3}, Springfield`,
     openingDue: i % 4 === 0 ? round2(rand() * 40) : 0,
     createdAt: daysAgoISO(100 - i * 6),
+    tier: (i === 0 ? "wholesale" : i === 1 ? "distributor" : "retail") as Customer["tier"],
+    creditLimit: i === 0 ? 2000 : i === 1 ? 5000 : i % 4 === 0 ? 200 : 0,
+    points: 20 + Math.floor(rand() * 180),
   }));
 
   const suppliers: Supplier[] = SUPPLIER_COMPANIES.map(([company], i) => ({
@@ -288,6 +301,10 @@ export function buildSeedDB(): DB {
   }
 
   const now = new Date();
+  const branches: Branch[] = [
+    { id: "br-main", name: "Main Branch", address: "Central Market Road", createdAt: daysAgoISO(400) },
+    { id: "br-2", name: "Riverside Outlet", address: "12 Riverside Drive", createdAt: daysAgoISO(180) },
+  ];
   return {
     products,
     categories,
@@ -310,6 +327,9 @@ export function buildSeedDB(): DB {
       canceledAt: null,
     },
     subInvoices: [],
+    saleReturns: [],
+    purchaseReturns: [],
+    branches,
     settings: {
       shopName: "Bright Leaf Market",
       tagline: "Grocery & Household",
@@ -318,7 +338,10 @@ export function buildSeedDB(): DB {
       lowStockDefault: 10,
       ownerName: "Omar Farouk",
       monthlyTarget: 6000,
-      branches: 1,
+      branches: 2,
+      loyaltyEnabled: true,
+      loyaltyRate: 1,
+      pointValue: 0.01,
     },
   };
 }

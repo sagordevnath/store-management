@@ -13,10 +13,12 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.116.0",
+    "@types/three": "^0.186.0",
     "cors": "^2.8.6",
     "express": "^5.2.1",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react-dom": "^18.3.1",
+    "three": "^0.186.0"
   },
   "devDependencies": {
     "@types/cors": "^2.8.19",

@@ -53,7 +53,7 @@ function daysAgo(n: number, hour = 9): string {
 
 function seed(): Registry {
   const raw: [string, string, string, string, AdminPlan, AdminStatus, number][] = [
-    ["Bright Leaf Market", "Omar Farouk", "+1 555 0100", "omar@brightleaf.co", "pro", "active", 210],
+    ["Utshorgo", "Sagor Devnath", "+880 1710 786364", "sagor@utshorgolive.com", "pro", "active", 210],
     ["Sunrise Mini Mart", "Nusrat Jahan", "+1 555 0111", "nusrat@sunrise.shop", "basic", "active", 180],
     ["GreenCart Grocers", "Daniel Osei", "+1 555 0122", "dan@greencart.io", "enterprise", "active", 150],
     ["Metro Daily Bazar", "Priya Nair", "+1 555 0133", "priya@metrodb.com", "pro", "past_due", 120],

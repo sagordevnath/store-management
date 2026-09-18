@@ -1,9 +1,9 @@
 import { useMemo, useState } from "react";
 import { useApp } from "../App";
-import type { Customer } from "../types";
+import type { Customer, PriceTier } from "../types";
 import { upsertCustomer, deleteCustomer, customerDue, customerDueList, collectDue } from "../lib/store";
 import { fmtMoney, fmtDate, initials, uid, downloadCSV } from "../lib/helpers";
-import { Badge, Button, Card, Field, Modal, NumberInput, TextInput, useToast, Th, Td, EmptyState } from "../ui";
+import { Badge, Button, Card, Field, Modal, NumberInput, Select, TextInput, useToast, Th, Td, EmptyState } from "../ui";
 import { IcPlus, IcSearch, IcEdit, IcTrash, IcDownload, IcCash, IcUsers } from "../icons";
 
 export default function CustomersPage() {
@@ -19,7 +19,12 @@ export default function CustomersPage() {
   const rows = useMemo(() => {
     const q = search.trim().toLowerCase();
     return db.customers
-      .map((c) => ({ c, due: customerDue(db, c.id, c.openingDue), purchases: db.sales.filter((s) => s.customerId === c.id).length }))
+      .map((c) => ({
+        c,
+        due: customerDue(db, c.id, c.openingDue),
+        purchases: db.sales.filter((s) => s.customerId === c.id).length,
+        spend: db.sales.filter((s) => s.customerId === c.id).reduce((s, x) => s + x.total, 0),
+      }))
       .filter(({ c }) => !q || c.name.toLowerCase().includes(q) || c.phone.includes(q))
       .sort((a, b) => b.due - a.due || a.c.name.localeCompare(b.c.name));
   }, [db, search]);
@@ -45,14 +50,14 @@ export default function CustomersPage() {
             variant="secondary"
             onClick={() =>
               downloadCSV("customers.csv", [
-                ["Name", "Phone", "Address", "Total purchases", "Current due"],
-                ...rows.map(({ c, due, purchases }) => [c.name, c.phone, c.address, purchases, due]),
+                ["Name", "Tier", "Phone", "Address", "Total purchases", "Points", "Current due", "Credit limit"],
+                ...rows.map(({ c, due, purchases }) => [c.name, c.tier, c.phone, c.address, purchases, c.points, due, c.creditLimit]),
               ])
             }
           >
             <IcDownload size={15} /> Export
           </Button>
-          <Button onClick={() => setEditing({ id: uid("c"), name: "", phone: "", address: "", openingDue: 0, createdAt: new Date().toISOString() })}>
+          <Button onClick={() => setEditing({ id: uid("c"), name: "", phone: "", address: "", openingDue: 0, createdAt: new Date().toISOString(), tier: "retail", creditLimit: 0, points: 0 })}>
             <IcPlus size={16} /> Add customer
           </Button>
         </div>
@@ -73,23 +78,30 @@ export default function CustomersPage() {
             <table className="w-full">
               <thead className="border-b border-ink-100 bg-ink-50/50">
                 <tr>
-                  <Th>Customer</Th><Th>Phone</Th><Th className="text-right">Purchases</Th>
-                  <Th className="text-right">Due</Th><Th>Status</Th><Th className="text-right">Actions</Th>
+                  <Th>Customer</Th><Th>Tier</Th><Th>Phone</Th><Th className="text-right">Purchases</Th>
+                  <Th className="text-right">Points</Th><Th className="text-right">Due / Limit</Th><Th>Status</Th><Th className="text-right">Actions</Th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-ink-100">
-                {rows.map(({ c, due, purchases }) => (
+                {rows.map(({ c, due, purchases, spend }) => (
                   <tr key={c.id} className="hover:bg-ink-50/60">
                     <Td>
                       <div className="flex items-center gap-2.5">
                         <span className="flex h-8 w-8 items-center justify-center rounded-full bg-brand-50 text-[11px] font-bold text-brand-700">{initials(c.name)}</span>
-                        <div><p className="font-medium text-ink-900">{c.name}</p><p className="text-xs text-ink-400">Since {fmtDate(c.createdAt)}</p></div>
+                        <div><p className="font-medium text-ink-900">{c.name}</p><p className="text-xs text-ink-400">{fmtMoney(spend, currency)} lifetime</p></div>
                       </div>
+                    </Td>
+                    <Td>
+                      <Badge tone={c.tier === "distributor" ? "violet" : c.tier === "wholesale" ? "blue" : "neutral"}>
+                        {c.tier === "retail" ? "Retail" : c.tier === "wholesale" ? "Wholesale" : "Distributor"}
+                      </Badge>
                     </Td>
                     <Td className="text-ink-500">{c.phone || "—"}</Td>
                     <Td className="text-right text-ink-500">{purchases}</Td>
+                    <Td className="text-right font-medium text-violet-700">{c.points}</Td>
                     <Td className="text-right font-semibold">
                       {due > 0.009 ? <span className="text-red-600">{fmtMoney(due, currency)}</span> : <span className="text-ink-300">—</span>}
+                      {c.creditLimit > 0 ? <span className="block text-[11px] text-ink-400">/ {fmtMoney(c.creditLimit, currency)}</span> : null}
                     </Td>
                     <Td><Badge tone={due > 0.009 ? "amber" : "green"}>{due > 0.009 ? "Has due" : "Clear"}</Badge></Td>
                     <Td>
@@ -232,9 +244,26 @@ function CustomerModal({ customer, onClose, onSave }: { customer: Customer; onCl
         <Field label="Full name"><TextInput value={c.name} onChange={(e) => set("name", e.target.value)} placeholder="e.g. Amelia Hart" /></Field>
         <Field label="Phone"><TextInput value={c.phone} onChange={(e) => set("phone", e.target.value)} placeholder="+1 555 0100" /></Field>
         <Field label="Address"><TextInput value={c.address} onChange={(e) => set("address", e.target.value)} placeholder="Street, city" /></Field>
-        <Field label="Opening due" hint="Balance the customer owed before joining the app">
-          <NumberInput value={c.openingDue} min={0} step="0.01" onChange={(e) => set("openingDue", Number(e.target.value) || 0)} />
-        </Field>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Price tier" hint="Drives POS pricing automatically">
+            <Select value={c.tier} onChange={(e) => set("tier", e.target.value as PriceTier)}>
+              <option value="retail">Retail</option>
+              <option value="wholesale">Wholesale</option>
+              <option value="distributor">Distributor</option>
+            </Select>
+          </Field>
+          <Field label="Credit limit" hint="0 = credit sales blocked">
+            <NumberInput value={c.creditLimit} min={0} step="10" onChange={(e) => set("creditLimit", Number(e.target.value) || 0)} />
+          </Field>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Loyalty points" hint="Adjust the balance manually if needed">
+            <NumberInput value={c.points} min={0} onChange={(e) => set("points", Number(e.target.value) || 0)} />
+          </Field>
+          <Field label="Opening due" hint="Balance owed before joining the app">
+            <NumberInput value={c.openingDue} min={0} step="0.01" onChange={(e) => set("openingDue", Number(e.target.value) || 0)} />
+          </Field>
+        </div>
       </div>
     </Modal>
   );

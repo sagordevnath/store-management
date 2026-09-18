@@ -17,7 +17,15 @@ export type FeatureKey =
   | "delivery_tracking"
   | "e_signature"
   | "voice_entry"
-  | "support_chat";
+  | "support_chat"
+  /* --- Phase 4 --- */
+  | "price_tiers"
+  | "returns"
+  | "smart_reorder"
+  | "expiry_tracking"
+  | "branches"
+  | "loyalty"
+  | "credit_sales";
 
 export interface PlanLimits {
   products: number; // Infinity = unlimited
@@ -44,7 +52,7 @@ export const PLANS: Record<Exclude<PlanTier, "trial">, PlanDef> = {
     monthly: 12,
     yearly: 120,
     accent: "from-sky-500 to-sky-600",
-    features: ["categories_nested", "target_progress", "compare_period", "voice_entry"],
+    features: ["categories_nested", "target_progress", "compare_period", "voice_entry", "returns", "expiry_tracking", "loyalty", "credit_sales"],
     limits: { products: 300, staff: 2, branches: 1 },
   },
   pro: {
@@ -55,6 +63,13 @@ export const PLANS: Record<Exclude<PlanTier, "trial">, PlanDef> = {
     yearly: 290,
     accent: "from-brand-500 to-brand-600",
     features: [
+      "price_tiers",
+      "smart_reorder",
+      "branches",
+      "returns",
+      "expiry_tracking",
+      "loyalty",
+      "credit_sales",
       "categories_nested",
       "categories_report",
       "bulk_recategorize",
@@ -93,6 +108,13 @@ export const PLANS: Record<Exclude<PlanTier, "trial">, PlanDef> = {
       "e_signature",
       "voice_entry",
       "support_chat",
+      "price_tiers",
+      "returns",
+      "smart_reorder",
+      "expiry_tracking",
+      "branches",
+      "loyalty",
+      "credit_sales",
     ],
     limits: { products: Infinity, staff: Infinity, branches: Infinity },
   },
