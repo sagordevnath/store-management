@@ -2,17 +2,19 @@ import { useMemo, useState } from "react";
 import { useApp } from "../App";
 import type { CartLine } from "../lib/store";
 import { makeSale, nextInvoiceNo, priceForTier, pointsEarnedFor } from "../lib/store";
-import { fmtMoney, round2 } from "../lib/helpers";
+import { fmtMoney, fmtDateTime, round2 } from "../lib/helpers";
 import { hasFeature } from "../lib/plans";
 import { productsInSubtree } from "../lib/categories";
 import type { Sale, PriceTier } from "../types";
 import { Badge, Button, Card, CategoryChips, Field, Modal, NumberInput, Select, SignPad, TextArea, TextInput, VoiceButton, useToast } from "../ui";
-import { IcSearch, IcPlus, IcTrash, IcPrint, IcCart, IcCheck, IcCash } from "../icons";
+import { IcSearch, IcPlus, IcTrash, IcPrint, IcCart, IcCheck, IcCash, IcDoc, IcEye, IcEyeOff } from "../icons";
+import { A4InvoiceModal } from "./A4Invoice";
+import { printIsolated } from "../lib/print";
 
 type PayMethod = "Cash" | "Card" | "Mobile Money" | "Due";
 
 export default function PosPage() {
-  const { db, update, currency, navigate } = useApp();
+  const { db, update, currency, navigate, t } = useApp();
   const toast = useToast();
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState<string | null>(null);
@@ -26,10 +28,13 @@ export default function PosPage() {
   const [paidInput, setPaidInput] = useState(0);
   const [note, setNote] = useState("");
   const [lastSale, setLastSale] = useState<Sale | null>(null);
+  const [a4For, setA4For] = useState<Sale | null>(null);
   const [receiptOpen, setReceiptOpen] = useState(false);
   const [tierOverride, setTierOverride] = useState<PriceTier | null>(null); // null = follow customer
   const [redeemInput, setRedeemInput] = useState(0);
   const [branchId, setBranchId] = useState<string>(db.branches[0]?.id ?? "");
+  const [marginsOpen, setMarginsOpen] = useState(false); // global "margin peek" mode
+  const [revealedLines, setRevealedLines] = useState<Set<string>>(new Set()); // per-line eyes
 
   const sub = db.subscription;
   const showChips = hasFeature(sub, "categories_nested");
@@ -77,6 +82,20 @@ export default function PosPage() {
   const maxRedeemCredit = round2(redeemablePoints * db.settings.pointValue);
   const redeemCredit = round2(Math.min(redeemInput * db.settings.pointValue, maxRedeemCredit));
   const finalTotal = round2(Math.max(0, discountedBase + tax - redeemCredit));
+
+  // ---- Margin peek (cost basis for discount decisions) ----
+  const costOf = (productId: string) => db.products.find((x) => x.id === productId)?.cost ?? 0;
+  const cartCost = round2(cart.reduce((s, l) => s + costOf(l.productId) * l.qty, 0));
+  const grossMargin = round2(subtotal - cartCost);
+  const marginAfterDiscount = round2(subtotal - discount - cartCost);
+  const saleAfterDiscount = round2(Math.max(0, subtotal - discount));
+  const toggleLineReveal = (productId: string) =>
+    setRevealedLines((prev) => {
+      const next = new Set(prev);
+      if (next.has(productId)) next.delete(productId);
+      else next.add(productId);
+      return next;
+    });
 
   const addToCart = (productId: string) => {
     const p = db.products.find((x) => x.id === productId);
@@ -226,69 +245,144 @@ export default function PosPage() {
         <Card className="flex h-full flex-col">
           <div className="flex items-center justify-between border-b border-ink-100 px-4 py-3">
             <div>
-              <h3 className="text-sm font-semibold text-ink-900">Current sale</h3>
-              <p className="text-[11px] text-ink-400">Next invoice: {nextInvoiceNo(db)}</p>
+              <h3 className="text-sm font-semibold text-ink-900">{t("pos.currentSale")}</h3>
+              <p className="text-[11px] text-ink-400">{t("pos.nextInvoice")}: {nextInvoiceNo(db)}</p>
             </div>
-            {cart.length ? (
-              <Button variant="ghost" size="sm" onClick={() => setCart([])}>Clear</Button>
-            ) : null}
+            <div className="flex items-center gap-1">
+              {cart.length ? (
+                <button
+                  onClick={() => setMarginsOpen((v) => !v)}
+                  title={marginsOpen ? "Hide purchase prices & margins" : "Show purchase prices & margins"}
+                  className={
+                    marginsOpen
+                      ? "flex h-7 items-center gap-1 rounded-md bg-brand-50 px-1.5 text-brand-600 ring-1 ring-brand-200"
+                      : "flex h-7 items-center gap-1 rounded-md px-1.5 text-ink-400 hover:bg-ink-100 hover:text-ink-600"
+                  }
+                >
+                  {marginsOpen ? <IcEye size={15} /> : <IcEyeOff size={15} />}
+                  <span className="text-[10px] font-semibold uppercase tracking-wide">Margin</span>
+                </button>
+              ) : null}
+              {cart.length ? <Button variant="ghost" size="sm" onClick={() => setCart([])}>{t("common.clear")}</Button> : null}
+            </div>
           </div>
 
           <div className="flex-1 overflow-y-auto px-2 py-2">
             {cart.length === 0 ? (
               <div className="flex h-full flex-col items-center justify-center gap-2 py-10 text-center">
                 <IcCart size={26} className="text-ink-300" />
-                <p className="text-sm text-ink-400">Cart is empty.<br />Tap products to add them.</p>
+                <p className="text-sm text-ink-400">{t("pos.cartEmpty")}<br />{t("pos.cartEmptyHint")}</p>
               </div>
             ) : (
-              cart.map((l) => (
-                <div key={l.productId} className="flex items-center gap-2 rounded-lg px-2 py-2 hover:bg-ink-50">
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium text-ink-800">{l.name}</p>
-                    <p className="text-xs text-ink-400">{fmtMoney(l.unitPrice, currency)} × {l.qty}</p>
+              cart.map((l) => {
+                const p = db.products.find((x) => x.id === l.productId);
+                const cost = costOf(l.productId);
+                const lineSale = round2(l.unitPrice * l.qty - l.discount);
+                const lineCost = round2(cost * l.qty);
+                const lineMargin = round2(lineSale - lineCost);
+                const linePct = lineSale > 0 ? (lineMargin / lineSale) * 100 : 0;
+                const revealed = marginsOpen || revealedLines.has(l.productId);
+                return (
+                  <div key={l.productId} className="rounded-lg px-2 py-2 hover:bg-ink-50">
+                    <div className="flex items-center gap-2">
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-medium text-ink-800">{l.name}</p>
+                        <p className="text-xs text-ink-400">{fmtMoney(l.unitPrice, currency)} × {l.qty}</p>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => setQty(l.productId, l.qty - 1)}
+                          className="flex h-7 w-7 items-center justify-center rounded-md border border-ink-200 text-ink-600 hover:bg-ink-100"
+                        >−</button>
+                        <span className="w-7 text-center text-sm font-semibold text-ink-900">{l.qty}</span>
+                        <button
+                          onClick={() => setQty(l.productId, l.qty + 1)}
+                          className="flex h-7 w-7 items-center justify-center rounded-md border border-ink-200 text-ink-600 hover:bg-ink-100"
+                        >+</button>
+                      </div>
+                      <span className="w-16 text-right text-sm font-semibold text-ink-900">
+                        {fmtMoney(lineSale, currency)}
+                      </span>
+                      <button
+                        onClick={() => toggleLineReveal(l.productId)}
+                        title={revealed ? "Hide purchase price" : "View purchase price & margin"}
+                        className={
+                          revealed
+                            ? "text-brand-600"
+                            : "text-ink-300 hover:text-ink-600"
+                        }
+                      >
+                        {revealed ? <IcEye size={15} /> : <IcEyeOff size={15} />}
+                      </button>
+                      <button
+                        onClick={() => setQty(l.productId, 0)}
+                        className="text-ink-300 hover:text-red-500"
+                        title="Remove"
+                      >
+                        <IcTrash size={14} />
+                      </button>
+                    </div>
+                    {revealed ? (
+                      <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 rounded-md border border-dashed border-ink-200 bg-ink-50/70 px-2.5 py-1.5 text-[11px] leading-snug">
+                        <span className="text-ink-400">Purchase</span>
+                        <span className="font-semibold text-ink-700">{fmtMoney(cost, currency)}</span>
+                        <span className="text-ink-200">|</span>
+                        <span className="text-ink-400">Line cost</span>
+                        <span className="font-semibold text-ink-700">{fmtMoney(lineCost, currency)}</span>
+                        <span className="text-ink-200">|</span>
+                        <span className="text-ink-400">Margin</span>
+                        <span className={`font-bold ${marginTone(linePct, lineMargin)}`}>
+                          {fmtMoney(lineMargin, currency)} · {linePct.toFixed(1)}%
+                        </span>
+                        {p?.stock != null ? (
+                          <span className="ml-auto text-ink-300">Stock: {p.stock} {p.unit}</span>
+                        ) : null}
+                      </div>
+                    ) : null}
                   </div>
-                  <div className="flex items-center gap-1">
-                    <button
-                      onClick={() => setQty(l.productId, l.qty - 1)}
-                      className="flex h-7 w-7 items-center justify-center rounded-md border border-ink-200 text-ink-600 hover:bg-ink-100"
-                    >−</button>
-                    <span className="w-7 text-center text-sm font-semibold text-ink-900">{l.qty}</span>
-                    <button
-                      onClick={() => setQty(l.productId, l.qty + 1)}
-                      className="flex h-7 w-7 items-center justify-center rounded-md border border-ink-200 text-ink-600 hover:bg-ink-100"
-                    >+</button>
-                  </div>
-                  <span className="w-16 text-right text-sm font-semibold text-ink-900">
-                    {fmtMoney(l.unitPrice * l.qty - l.discount, currency)}
-                  </span>
-                  <button
-                    onClick={() => setQty(l.productId, 0)}
-                    className="text-ink-300 hover:text-red-500"
-                    title="Remove"
-                  >
-                    <IcTrash size={14} />
-                  </button>
-                </div>
-              ))
+                );
+              })
             )}
           </div>
 
           <div className="space-y-1.5 border-t border-ink-100 px-4 py-3 text-sm">
-            <Row label="Subtotal" value={fmtMoney(subtotal, currency)} />
-            {discount > 0 ? <Row label="Discount" value={`− ${fmtMoney(discount, currency)}`} /> : null}
-            {tax > 0 ? <Row label={`VAT (${db.settings.taxRate}%)`} value={fmtMoney(tax, currency)} /> : null}
+            {marginsOpen && cart.length > 0 ? (
+              <div className="mb-1 space-y-1 rounded-lg border border-dashed border-brand-200 bg-brand-50/50 px-3 py-2 text-xs">
+                <div className="flex justify-between">
+                  <span className="text-ink-500">Cost of items</span>
+                  <span className="font-semibold text-ink-700">{fmtMoney(cartCost, currency)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-ink-500">Gross margin</span>
+                  <span className={`font-bold ${marginTone(subtotal > 0 ? (grossMargin / subtotal) * 100 : 0, grossMargin)}`}>
+                    {fmtMoney(grossMargin, currency)} · {subtotal > 0 ? ((grossMargin / subtotal) * 100).toFixed(1) : "0.0"}%
+                  </span>
+                </div>
+                {discount > 0 ? (
+                  <div className="flex justify-between border-t border-dashed border-brand-200 pt-1">
+                    <span className="text-ink-500">Margin after discount</span>
+                    <span className={`font-bold ${marginTone(saleAfterDiscount > 0 ? (marginAfterDiscount / saleAfterDiscount) * 100 : 0, marginAfterDiscount)}`}>
+                      {fmtMoney(marginAfterDiscount, currency)} · {saleAfterDiscount > 0 ? ((marginAfterDiscount / saleAfterDiscount) * 100).toFixed(1) : "0.0"}%
+                    </span>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+            <Row label={t("common.subtotal")} value={fmtMoney(subtotal, currency)} />
+            {discount > 0 ? <Row label={t("common.discount")} value={`− ${fmtMoney(discount, currency)}`} /> : null}
+            {tax > 0 ? <Row label={`${t("common.vat")} (${db.settings.taxRate}%)`} value={fmtMoney(tax, currency)} /> : null}
             {vatInCart && db.settings.taxRate > 0 && tax < subtotal * (db.settings.taxRate / 100) ? (
               <p className="text-xs text-ink-400">VAT-inclusive items are not taxed again.</p>
             ) : null}
             <div className="flex items-center justify-between border-t border-dashed border-ink-200 pt-2 text-base font-bold text-ink-900">
-              <span>Total</span>
+              <span>{t("common.total")}</span>
               <span>{fmtMoney(finalTotal, currency)}</span>
             </div>
             {activeTier !== "retail" ? (
               <p className="text-xs font-medium text-brand-600">{activeTier === "wholesale" ? "Wholesale" : "Distributor"} pricing applied</p>
             ) : null}
             <Button className="mt-2 w-full" size="lg" disabled={cart.length === 0} onClick={() => { setCheckoutOpen(true); setPaidInput(finalTotal); }}>
-              <IcCheck size={16} /> Charge {fmtMoney(finalTotal, currency)}
+              <IcCheck size={16} /> {t("pos.charge")} {fmtMoney(finalTotal, currency)}
             </Button>
           </div>
         </Card>
@@ -298,7 +392,7 @@ export default function PosPage() {
       <div className="fixed bottom-4 left-4 right-4 z-30 md:hidden">
         {cart.length > 0 ? (
           <Button size="lg" className="w-full shadow-pop" onClick={() => setCheckoutOpen(true)}>
-            <IcCart size={16} /> {cart.length} items · {fmtMoney(total, currency)} — Checkout
+            <IcCart size={16} /> {cart.length} {t("pos.items")} · {fmtMoney(total, currency)} — {t("pos.checkout")}
           </Button>
         ) : null}
       </div>
@@ -311,13 +405,13 @@ export default function PosPage() {
         footer={
           <div className="flex justify-end gap-2">
             <Button variant="secondary" onClick={() => setCheckoutOpen(false)}>Cancel</Button>
-            <Button onClick={completeSale}><IcCheck size={15} /> Confirm sale</Button>
+            <Button onClick={completeSale}><IcCheck size={15} /> {t("pos.confirmSale")}</Button>
           </div>
         }
       >
         <div className="space-y-4">
           <div className="rounded-xl bg-ink-50 px-4 py-3 text-center">
-            <p className="text-xs text-ink-500">Amount due</p>
+            <p className="text-xs text-ink-500">{t("pos.amountDue")}</p>
             <p className="text-2xl font-bold text-ink-900">{fmtMoney(finalTotal, currency)}</p>
           </div>
 
@@ -359,7 +453,7 @@ export default function PosPage() {
             </div>
           ) : null}
 
-          <Field label="Payment method">
+          <Field label={t("pos.paymentMethod")}>
             <div className="grid grid-cols-2 gap-2">
               {(["Cash", "Card", "Mobile Money", "Due"] as PayMethod[]).map((m) => (
                 <button
@@ -372,7 +466,7 @@ export default function PosPage() {
                   }
                 >
                   {m === "Cash" ? <IcCash size={15} className="mr-1 inline" /> : null}
-                  {m}
+                  {m === "Cash" ? t("pos.payCash") : m === "Card" ? t("pos.payCard") : m === "Mobile Money" ? t("pos.payMobile") : t("pos.payDue")}
                 </button>
               ))}
             </div>
@@ -406,7 +500,7 @@ export default function PosPage() {
           ) : null}
 
           <div className="grid grid-cols-2 gap-3">
-            <Field label="Order discount" hint={anyDiscountable ? undefined : "No discountable items in cart"}>
+            <Field label={t("pos.orderDiscount")} hint={anyDiscountable ? undefined : "No discountable items in cart"}>
               <NumberInput
                 value={orderDiscount}
                 min={0}
@@ -414,9 +508,9 @@ export default function PosPage() {
                 onChange={(e) => setOrderDiscount(anyDiscountable ? Number(e.target.value) || 0 : 0)}
               />
             </Field>
-            <Field label="Customer (optional)">
+            <Field label={`${t("pos.customer")} (optional)`}>
               <Select value={customerId} onChange={(e) => { setCustomerId(e.target.value); setTierOverride(null); setRedeemInput(0); }} disabled={payment === "Due"}>
-                <option value="">Walk-in customer</option>
+                <option value="">{t("pos.walkIn")}</option>
                 {db.customers.map((c) => (
                   <option key={c.id} value={c.id}>{c.name}</option>
                 ))}
@@ -431,6 +525,56 @@ export default function PosPage() {
               </Select>
             </Field>
           ) : null}
+
+          {/* Margin peek — the discount decision point */}
+          <div className="rounded-xl border border-ink-200 bg-ink-50/50 px-4 py-3">
+            <div className="flex items-center justify-between">
+              <p className="text-xs font-semibold uppercase tracking-wide text-ink-500">{t("pos.purchasePrice")} & {t("pos.margin")}</p>
+              <button
+                onClick={() => setMarginsOpen((v) => !v)}
+                className={
+                  marginsOpen
+                    ? "flex items-center gap-1.5 rounded-md bg-brand-50 px-2 py-1 text-[11px] font-semibold text-brand-600 ring-1 ring-brand-200"
+                    : "flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px] font-medium text-ink-500 hover:bg-ink-100"
+                }
+              >
+                {marginsOpen ? <IcEye size={14} /> : <IcEyeOff size={14} />}
+                {marginsOpen ? "Visible" : "Hidden"}
+              </button>
+            </div>
+            {marginsOpen ? (
+              <div className="mt-2 space-y-1 text-xs">
+                {cart.map((l) => {
+                  const cost = costOf(l.productId);
+                  const lineSale = round2(l.unitPrice * l.qty - l.discount);
+                  const lineCost = round2(cost * l.qty);
+                  const lineMargin = round2(lineSale - lineCost);
+                  const linePct = lineSale > 0 ? (lineMargin / lineSale) * 100 : 0;
+                  return (
+                    <div key={l.productId} className="flex items-center justify-between gap-3">
+                      <span className="min-w-0 flex-1 truncate text-ink-600">{l.name}</span>
+                      <span className="shrink-0 text-ink-400">cost {fmtMoney(cost, currency)}</span>
+                      <span className={`w-28 shrink-0 text-right font-semibold ${marginTone(linePct, lineMargin)}`}>
+                        {fmtMoney(lineMargin, currency)} · {linePct.toFixed(1)}%
+                      </span>
+                    </div>
+                  );
+                })}
+                <div className="flex justify-between border-t border-dashed border-ink-200 pt-1">
+                  <span className="text-ink-500">Total cost</span>
+                  <span className="font-semibold text-ink-700">{fmtMoney(cartCost, currency)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-ink-500">{discount > 0 ? "Margin after discount" : "Gross margin"}</span>
+                  <span className={`font-bold ${marginTone(saleAfterDiscount > 0 ? (marginAfterDiscount / saleAfterDiscount) * 100 : 0, marginAfterDiscount)}`}>
+                    {fmtMoney(marginAfterDiscount, currency)} · {saleAfterDiscount > 0 ? ((marginAfterDiscount / saleAfterDiscount) * 100).toFixed(1) : "0.0"}%
+                  </span>
+                </div>
+              </div>
+            ) : (
+              <p className="mt-1 text-[11px] text-ink-400">Tap the eye to check how much room you have before giving a discount.</p>
+            )}
+          </div>
 
           <Field label="Note">
             <TextArea rows={2} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Optional note on the invoice" />
@@ -454,11 +598,15 @@ export default function PosPage() {
       <Modal open={receiptOpen} onClose={() => setReceiptOpen(false)} title="Receipt" footer={
         <div className="flex justify-end gap-2">
           <Button variant="secondary" onClick={() => setReceiptOpen(false)}>Close</Button>
-          <Button onClick={() => window.print()}><IcPrint size={15} /> Print</Button>
+          {lastSale ? <Button variant="secondary" onClick={() => { setA4For(lastSale); setReceiptOpen(false); }}><IcDoc size={15} /> A4 invoice</Button> : null}
+          <Button onClick={() => printIsolated("receipt-print", "receipt-printing")}><IcPrint size={15} /> Print</Button>
         </div>
       }>
-        {lastSale ? <Receipt sale={lastSale} shopName={db.settings.shopName} currency={currency} /> : null}
+        {lastSale ? <Receipt sale={lastSale} shopName={db.settings.shopName} currency={currency} logo={db.settings.logo} /> : null}
       </Modal>
+
+      {/* A4 invoice */}
+      {a4For ? <A4InvoiceModal sale={a4For} db={db} onClose={() => setA4For(null)} /> : null}
     </div>
   );
 }
@@ -472,16 +620,25 @@ function Row({ label, value }: { label: string; value: string }) {
   );
 }
 
-export function Receipt({ sale, shopName, currency }: { sale: Sale; shopName: string; currency: string }) {
+/** Color code for a margin value: healthy → thin → loss. */
+function marginTone(pct: number, marginValue: number): string {
+  if (marginValue < 0) return "text-red-600";
+  if (pct < 10) return "text-red-500";
+  if (pct < 25) return "text-amber-600";
+  return "text-emerald-600";
+}
+
+export function Receipt({ sale, shopName, currency, logo }: { sale: Sale; shopName: string; currency: string; logo?: string | null }) {
   return (
     <div id="receipt-print" className="mx-auto max-w-xs font-mono text-[13px] text-ink-900">
       <div className="text-center">
+        {logo ? <img src={logo} alt="Logo" className="mx-auto mb-1.5 h-10 w-10 rounded-lg object-cover" /> : null}
         <p className="text-base font-bold">{shopName}</p>
         <p className="text-[11px] text-ink-500">Thank you for shopping with us</p>
       </div>
       <div className="my-2 border-y border-dashed border-ink-300 py-2 text-[11px] text-ink-600">
         <p>Invoice: {sale.invoiceNo}</p>
-        <p>Date: {new Date(sale.at).toLocaleString()}</p>
+        <p>Date: {fmtDateTime(sale.at)}</p>
         <p>Cashier: {sale.cashier}</p>
       </div>
       <table className="w-full text-[12px]">

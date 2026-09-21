@@ -23,7 +23,7 @@ const TONES: Record<ExpenseCategory, "green" | "red" | "amber" | "blue" | "viole
 };
 
 export default function ExpensesPage() {
-  const { db, update, currency } = useApp();
+  const { db, update, currency, t } = useApp();
   const toast = useToast();
   const [adding, setAdding] = useState(false);
   const [category, setCategory] = useState("All");
@@ -67,7 +67,7 @@ export default function ExpensesPage() {
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Segmented
-            options={PERIODS.map((p) => ({ value: p.value, label: p.label }))}
+            options={PERIODS.map((p) => ({ value: p.value, label: t(p.labelKey) }))}
             value={period}
             onChange={(v) => setPeriod(v as PeriodKey)}
           />

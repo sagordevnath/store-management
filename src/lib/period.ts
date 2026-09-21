@@ -1,30 +1,34 @@
 import type { DB } from "../types";
 import { round2, startOfDay } from "./helpers";
+import { activeLang, activeLocale, localizeDigits, makeT } from "./i18n";
+
+const loc = () => activeLocale();
+const dig = (s: string) => localizeDigits(s);
 
 /** Dashboard period selector: today / weekly / monthly / yearly / all time. */
 export type PeriodKey = "today" | "weekly" | "monthly" | "yearly" | "all";
 
-export const PERIODS: { value: PeriodKey; label: string }[] = [
-  { value: "today", label: "Today" },
-  { value: "weekly", label: "Weekly" },
-  { value: "monthly", label: "Monthly" },
-  { value: "yearly", label: "Yearly" },
-  { value: "all", label: "All time" },
+export const PERIODS: { value: PeriodKey; label: string; labelKey: string }[] = [
+  { value: "today", label: "Today", labelKey: "period.today" },
+  { value: "weekly", label: "Weekly", labelKey: "period.weekly" },
+  { value: "monthly", label: "Monthly", labelKey: "period.monthly" },
+  { value: "yearly", label: "Yearly", labelKey: "period.yearly" },
+  { value: "all", label: "All time", labelKey: "period.all" },
 ];
 
-/** "Today's" / "This week's" … for card labels like "Today's sales". */
-export function periodLabel(key: PeriodKey): string {
+/** i18n key for "Today's" / "This week's" … card labels like "Today's sales". */
+export function periodLabelKey(key: PeriodKey): string {
   switch (key) {
     case "today":
-      return "Today's";
+      return "period.todayOf";
     case "weekly":
-      return "This week's";
+      return "period.weeklyOf";
     case "monthly":
-      return "This month's";
+      return "period.monthlyOf";
     case "yearly":
-      return "This year's";
+      return "period.yearlyOf";
     case "all":
-      return "All-time";
+      return "period.allOf";
   }
 }
 
@@ -41,6 +45,22 @@ export function periodName(key: PeriodKey): string {
       return "this year";
     case "all":
       return "all time";
+  }
+}
+
+/** i18n key for the human period name: "today", "this week", … */
+export function periodNameKey(key: PeriodKey): string {
+  switch (key) {
+    case "today":
+      return "period.nameToday";
+    case "weekly":
+      return "period.nameWeekly";
+    case "monthly":
+      return "period.nameMonthly";
+    case "yearly":
+      return "period.nameYearly";
+    case "all":
+      return "period.nameAll";
   }
 }
 
@@ -74,7 +94,7 @@ export interface PeriodRange {
 
 export function periodRange(key: PeriodKey, now = new Date()): PeriodRange {
   const start = startOfDay(new Date(now));
-  const fmt = (d: Date) => d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  const fmt = (d: Date) => dig(d.toLocaleDateString(loc(), { month: "short", day: "numeric", year: "numeric" }));
 
   if (key === "today") {
     const p = startOfDay(new Date(now));
@@ -174,13 +194,13 @@ export interface PeriodMetrics {
 export function periodMetrics(db: DB, key: PeriodKey): PeriodMetrics {
   const r = periodRange(key, new Date());
   const inP = (iso: string) => inRange(iso, r.start, r.end);
-  const fmtD = (d: Date) => d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  const fmtD = (d: Date) => dig(d.toLocaleDateString(loc(), { month: "short", day: "numeric", year: "numeric" }));
   // All-time text uses the earliest record when available.
   const rangeText =
     key === "all"
       ? db.sales.length
-        ? `Since ${fmtD(new Date(Math.min(...db.sales.map((s) => new Date(s.at).getTime()))))}`
-        : "No sales yet"
+        ? makeT(activeLang())("period.since", { date: fmtD(new Date(Math.min(...db.sales.map((s) => new Date(s.at).getTime())))) })
+        : makeT(activeLang())("period.noSales")
       : r.text;
 
   let salesTotal = 0,
@@ -413,7 +433,7 @@ export function revenueSeries(db: DB, key: PeriodKey): { label: string; value: n
       const from = new Date(r.start);
       from.setHours(h, 0, 0, 0);
       buckets.push({
-        label: `${h % 12 === 0 ? 12 : h % 12}${h < 12 ? "am" : "pm"}`,
+        label: dig(`${h % 12 === 0 ? 12 : h % 12}${h < 12 ? "am" : "pm"}`),
         from: from.getTime(),
         to: from.getTime() + 3599999,
       });
@@ -424,7 +444,7 @@ export function revenueSeries(db: DB, key: PeriodKey): { label: string; value: n
       d.setDate(d.getDate() + i);
       const from = startOfDay(new Date(d));
       buckets.push({
-        label: d.toLocaleDateString("en-US", { weekday: "short" }),
+        label: dig(d.toLocaleDateString(loc(), { weekday: "short" })),
         from: from.getTime(),
         to: from.getTime() + 86399999,
       });
@@ -435,13 +455,13 @@ export function revenueSeries(db: DB, key: PeriodKey): { label: string; value: n
       const d = new Date(r.start);
       d.setDate(i);
       const from = startOfDay(new Date(d));
-      buckets.push({ label: `${i}`, from: from.getTime(), to: from.getTime() + 86399999 });
+      buckets.push({ label: dig(`${i}`), from: from.getTime(), to: from.getTime() + 86399999 });
     }
   } else if (key === "yearly") {
     for (let m = 0; m <= r.end.getMonth(); m++) {
       const d = new Date(r.start.getFullYear(), m, 1);
       const to = new Date(r.start.getFullYear(), m + 1, 1).getTime() - 1;
-      buckets.push({ label: d.toLocaleDateString("en-US", { month: "short" }), from: d.getTime(), to });
+      buckets.push({ label: dig(d.toLocaleDateString(loc(), { month: "short" })), from: d.getTime(), to });
     }
   } else {
     let min = Date.now();
@@ -455,7 +475,7 @@ export function revenueSeries(db: DB, key: PeriodKey): { label: string; value: n
     for (const d of months.slice(-18)) {
       const to = new Date(d.getFullYear(), d.getMonth() + 1, 1).getTime() - 1;
       buckets.push({
-        label: d.toLocaleDateString("en-US", { month: "short", year: "2-digit" }),
+        label: dig(d.toLocaleDateString(loc(), { month: "short", year: "2-digit" })),
         from: d.getTime(),
         to,
       });

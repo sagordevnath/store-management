@@ -342,6 +342,15 @@ export function buildSeedDB(): DB {
       loyaltyEnabled: true,
       loyaltyRate: 1,
       pointValue: 0.01,
+      /* branding & invoices */
+      logo: null,
+      ownerImage: null,
+      address: "142 Green Road, Farmgate, Dhaka 1205",
+      phone: "+880 1712 345 678",
+      email: "hello@brightleaf.market",
+      website: "brightleaf.market",
+      regNo: "BIN 004512789-0201",
+      invoiceNote: "Goods once sold are returnable within 7 days with this invoice. Thank you for shopping with us!",
     },
   };
 }

@@ -1,3 +1,5 @@
+import { activeLang, activeLocale, localizeDigits } from "./i18n";
+
 let n = 0;
 export function uid(prefix = "id"): string {
   n += 1;
@@ -11,7 +13,7 @@ export const round2 = (x: number) => Math.round(x * 100) / 100;
 export function fmtMoney(value: number, symbol = "$"): string {
   const neg = value < 0;
   const v = Math.abs(value);
-  const s = v.toLocaleString("en-US", {
+  const s = v.toLocaleString(activeLocale(), {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });
@@ -20,13 +22,18 @@ export function fmtMoney(value: number, symbol = "$"): string {
 
 export function fmtCompact(value: number, symbol = "$"): string {
   const abs = Math.abs(value);
+  if (activeLang() === "bn") {
+    if (abs >= 10_000_000) return `${symbol}${localizeDigits((value / 10_000_000).toFixed(1))} কোটি`;
+    if (abs >= 100_000) return `${symbol}${localizeDigits((value / 100_000).toFixed(1))} লাখ`;
+    if (abs >= 1_000) return `${symbol}${localizeDigits((value / 1_000).toFixed(1))} হাজার`;
+  }
   if (abs >= 1_000_000) return `${symbol}${(value / 1_000_000).toFixed(1)}M`;
   if (abs >= 1_000) return `${symbol}${(value / 1_000).toFixed(1)}K`;
   return fmtMoney(value, symbol);
 }
 
 export function fmtDate(iso: string): string {
-  return new Date(iso).toLocaleDateString("en-US", {
+  return new Date(iso).toLocaleDateString(activeLocale(), {
     month: "short",
     day: "numeric",
     year: "numeric",
@@ -34,7 +41,7 @@ export function fmtDate(iso: string): string {
 }
 
 export function fmtDateTime(iso: string): string {
-  return new Date(iso).toLocaleString("en-US", {
+  return new Date(iso).toLocaleString(activeLocale(), {
     month: "short",
     day: "numeric",
     year: "numeric",

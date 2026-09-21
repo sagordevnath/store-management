@@ -6,6 +6,7 @@ import { fmtMoney, fmtDateTime, uid } from "../lib/helpers";
 import { Badge, Button, Card, Field, Modal, NumberInput, Select, TextArea, TextInput, useToast, Th, Td, EmptyState } from "../ui";
 import { IcPlus, IcSearch, IcDownload, IcTrash, IcCash, IcRefresh } from "../icons";
 import { downloadCSV } from "../lib/helpers";
+import { buildTree, productsInSubtree } from "../lib/categories";
 import { PurchaseReturnModal } from "./ReturnsPage";
 
 export default function PurchasesPage() {
@@ -214,7 +215,7 @@ function CreatePurchaseModal({ open, onClose, prefill }: { open: boolean; onClos
   const [paidInput, setPaidInput] = useState(0);
   const [shipping, setShipping] = useState(0);
   const [note, setNote] = useState("");
-  const [lines, setLines] = useState<{ productId: string; unitCost: number; qty: number; batch?: string; expiry?: string }[]>([]);
+  const [lines, setLines] = useState<{ productId: string; unitCost: number; qty: number; batch?: string; expiry?: string; _cat?: string }[]>([]);
 
   // Prefill from the smart-reorder engine each time the modal opens in prefill mode.
   useEffect(() => {
@@ -231,17 +232,24 @@ function CreatePurchaseModal({ open, onClose, prefill }: { open: boolean; onClos
   const total = round2(subtotal + shipping);
   const expiryTracked = lines.some((l) => db.products.find((p) => p.id === l.productId)?.trackExpiry);
 
+  // Flat, DFS-ordered category list — label is the full "Parent › Sub" path.
+  const catOptions = useMemo(
+    () => buildTree(db).map((n) => ({ id: n.id, label: n.path.join(" › ") })),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [db.categories, db.products],
+  );
+
   const addLine = () => {
     const first = db.products.find((p) => !lines.some((l) => l.productId === p.id));
     if (!first) return;
-    setLines((ls) => [...ls, { productId: first.id, unitCost: first.cost, qty: 10 }]);
+    setLines((ls) => [...ls, { productId: first.id, unitCost: first.cost, qty: 10, _cat: first.categoryId ?? undefined }]);
   };
 
   const save = () => {
     if (lines.length === 0) return;
     const { db: next, purchase } = makePurchase(db, {
       supplierId: supplierId || null,
-      items: lines,
+      items: lines.map(({ _cat, ...rest }) => rest),
       shipping,
       payment,
       paidAmount: payment === "Paid" ? total : paidInput,
@@ -308,6 +316,14 @@ function CreatePurchaseModal({ open, onClose, prefill }: { open: boolean; onClos
             <p className="text-xs font-semibold uppercase tracking-wide text-ink-500">Items</p>
             <Button variant="secondary" size="sm" onClick={addLine}><IcPlus size={13} /> Add item</Button>
           </div>
+          <div className="mb-1 hidden gap-2 px-2 text-[11px] font-semibold uppercase tracking-wide text-ink-400 sm:grid sm:grid-cols-[minmax(0,1fr)_minmax(0,1.6fr)_5.5rem_4rem_5.5rem_1.75rem]">
+            <span>Category</span>
+            <span>Product</span>
+            <span className="text-right">Unit cost</span>
+            <span className="text-right">Qty</span>
+            <span className="text-right">Total</span>
+            <span />
+          </div>
           <div className="space-y-2">
             {lines.length === 0 ? (
               <p className="rounded-lg border border-dashed border-ink-200 px-4 py-6 text-center text-sm text-ink-400">
@@ -316,35 +332,73 @@ function CreatePurchaseModal({ open, onClose, prefill }: { open: boolean; onClos
             ) : (
               lines.map((l, i) => {
                 const p = db.products.find((x) => x.id === l.productId);
+                const catForLine = l._cat ?? p?.categoryId ?? "";
+                const pool = catForLine ? db.products.filter((x) => productsInSubtree(db, catForLine).has(x.id)) : db.products;
                 return (
                   <div key={i} className="rounded-lg border border-ink-200 p-2">
-                    <div className="flex items-center gap-2">
+                    <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1.6fr)_5.5rem_4rem_5.5rem_1.75rem] sm:items-center">
                       <Select
-                        value={l.productId}
-                        className="min-w-0 flex-1"
+                        value={catForLine}
+                        className="min-w-0"
+                        title="Filter products by category"
                         onChange={(e) => {
-                          const pid = e.target.value;
-                          const np = db.products.find((x) => x.id === pid)!;
-                          setLines((ls) => ls.map((x, j) => (j === i ? { ...x, productId: pid, unitCost: np.cost } : x)));
+                          const c = e.target.value;
+                          setLines((ls) =>
+                            ls.map((x, j) => {
+                              if (j !== i) return x;
+                              const cur = db.products.find((pp) => pp.id === x.productId);
+                              const keep = !!cur && !!c && productsInSubtree(db, c).has(cur.id);
+                              return keep ? { ...x, _cat: c } : { ...x, _cat: c, productId: "", unitCost: 0 };
+                            }),
+                          );
                         }}
                       >
-                        {db.products.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                        <option value="">All categories</option>
+                        {catOptions.map((c) => (
+                          <option key={c.id} value={c.id}>{c.label}</option>
+                        ))}
+                      </Select>
+                      <Select
+                        value={l.productId}
+                        className="min-w-0"
+                        onChange={(e) => {
+                          const pid = e.target.value;
+                          if (!pid) {
+                            setLines((ls) => ls.map((x, j) => (j === i ? { ...x, productId: "", unitCost: 0 } : x)));
+                            return;
+                          }
+                          const np = db.products.find((x) => x.id === pid)!;
+                          setLines((ls) => ls.map((x, j) => (j === i ? { ...x, productId: pid, unitCost: np.cost, _cat: np.categoryId ?? x._cat } : x)));
+                        }}
+                      >
+                        <option value="">Select product…</option>
+                        {pool.map((x) => (
+                          <option key={x.id} value={x.id}>
+                            {x.name} — {fmtMoney(x.cost, currency)} · {x.stock} {x.unit}
+                          </option>
+                        ))}
                       </Select>
                       <NumberInput
                         value={l.unitCost}
                         min={0}
                         step="0.01"
-                        className="w-24"
+                        className="w-full"
+                        aria-label="Unit cost"
                         onChange={(e) => setLines((ls) => ls.map((x, j) => (j === i ? { ...x, unitCost: Number(e.target.value) || 0 } : x)))}
                       />
                       <NumberInput
                         value={l.qty}
                         min={1}
-                        className="w-20"
+                        className="w-full"
+                        aria-label="Quantity"
                         onChange={(e) => setLines((ls) => ls.map((x, j) => (j === i ? { ...x, qty: Number(e.target.value) || 0 } : x)))}
                       />
-                      <span className="w-24 text-right text-sm font-medium">{fmtMoney(l.unitCost * l.qty, currency)}</span>
-                      <button className="text-ink-300 hover:text-red-500" onClick={() => setLines((ls) => ls.filter((_, j) => j !== i))}>
+                      <span className="text-right text-sm font-semibold text-ink-800">{fmtMoney(l.unitCost * l.qty, currency)}</span>
+                      <button
+                        className="justify-self-end text-ink-300 hover:text-red-500"
+                        title="Remove line"
+                        onClick={() => setLines((ls) => ls.filter((_, j) => j !== i))}
+                      >
                         <IcTrash size={14} />
                       </button>
                     </div>

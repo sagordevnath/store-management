@@ -1,5 +1,6 @@
 import type { DB } from "../types";
 import { round2, startOfDay } from "./helpers";
+import { activeLocale, localizeDigits } from "./i18n";
 
 /**
  * Rules-based "AI" analytics: daily insight text and a naive cash-flow
@@ -107,7 +108,7 @@ export function forecastCashflow(db: DB, days = 14): ForecastPoint[] {
     const net = round2(dailyIn - dailyOut);
     cum = round2(cum + net);
     out.push({
-      label: d.toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+      label: localizeDigits(d.toLocaleDateString(activeLocale(), { month: "short", day: "numeric" })),
       inflow: dailyIn,
       outflow: dailyOut,
       net,

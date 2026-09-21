@@ -4,6 +4,7 @@ import type { StaffMember } from "../types";
 import { upsertStaff, deleteStaff } from "../lib/store";
 import { fmtMoney, fmtDate, initials, uid } from "../lib/helpers";
 import { Badge, Button, Card, Field, Modal, TextInput, useToast, Th, Td, EmptyState } from "../ui";
+import { ImagePicker } from "./SettingsPage";
 import { IcPlus, IcEdit, IcTrash, IcStaff } from "../icons";
 
 export default function StaffPage() {
@@ -43,9 +44,13 @@ export default function StaffPage() {
             <Card key={m.id} className="p-5">
               <div className="flex items-start justify-between">
                 <div className="flex items-center gap-3">
-                  <span className="flex h-10 w-10 items-center justify-center rounded-full bg-brand-50 text-sm font-bold text-brand-700">
-                    {initials(m.name)}
-                  </span>
+                  {m.image ? (
+                    <img src={m.image} alt={m.name} className="h-10 w-10 shrink-0 rounded-full object-cover ring-1 ring-ink-200" />
+                  ) : (
+                    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-brand-50 text-sm font-bold text-brand-700">
+                      {initials(m.name)}
+                    </span>
+                  )}
                   <div>
                     <p className="text-sm font-semibold text-ink-900">{m.name}</p>
                     <p className="text-xs text-ink-400">{m.role}</p>
@@ -111,6 +116,15 @@ function StaffModal({ member, onClose, onSave }: { member: StaffMember; onClose:
       }
     >
       <div className="space-y-3">
+        <div className="flex items-center gap-4">
+          <ImagePicker
+            value={m.image ?? null}
+            shape="round"
+            fallback={m.name.slice(0, 1).toUpperCase() || "S"}
+            onChange={(v) => setM((x) => ({ ...x, image: v }))}
+          />
+          <p className="text-xs text-ink-400">Staff photo — shown on the team cards and printed on invoices handled by this member.</p>
+        </div>
         <Field label="Full name"><TextInput value={m.name} onChange={(e) => set("name", e.target.value)} placeholder="e.g. Sam Whitfield" /></Field>
         <div className="grid grid-cols-2 gap-3">
           <Field label="Role">

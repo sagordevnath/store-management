@@ -195,6 +195,7 @@ export interface StaffMember {
   phone: string;
   joinedAt: string;
   active: boolean;
+  image?: string | null; // staff photo (dataURL)
 }
 
 /* ---------------- Subscription / billing ---------------- */
@@ -249,6 +250,15 @@ export interface Settings {
   loyaltyEnabled: boolean;
   loyaltyRate: number; // points earned per 100 spent
   pointValue: number; // currency value of one point when redeeming
+  /* --- Branding & invoices (Phase 5) --- */
+  logo?: string | null; // company logo (dataURL) — sidebar, invoices
+  ownerImage?: string | null; // owner photo — settings profile + invoice signatory
+  address?: string; // shop address printed on invoices
+  phone?: string;
+  email?: string;
+  website?: string;
+  regNo?: string; // business / VAT registration number
+  invoiceNote?: string; // footer note (terms, thank-you, return policy)
 }
 
 export interface DB {

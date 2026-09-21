@@ -4,9 +4,11 @@ import type { Sale } from "../types";
 import { collectDue, customerDueList } from "../lib/store";
 import { fmtMoney, fmtDateTime, downloadCSV } from "../lib/helpers";
 import { Badge, Button, Card, Field, Modal, NumberInput, Select, TextInput, useToast, Th, Td, EmptyState } from "../ui";
-import { IcSearch, IcDownload, IcPrint, IcCash, IcRefresh } from "../icons";
+import { IcSearch, IcDownload, IcPrint, IcCash, IcRefresh, IcDoc } from "../icons";
 import { Receipt } from "./PosPage";
 import { SaleReturnModal } from "./ReturnsPage";
+import { A4InvoiceModal } from "./A4Invoice";
+import { printIsolated } from "../lib/print";
 
 type Filter = "all" | "due" | "paid";
 
@@ -21,6 +23,7 @@ export default function SalesPage() {
   const [amount, setAmount] = useState(0);
   const [receiptFor, setReceiptFor] = useState<Sale | null>(null);
   const [returnFor, setReturnFor] = useState<Sale | null>(null);
+  const [a4For, setA4For] = useState<Sale | null>(null);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -153,7 +156,8 @@ export default function SalesPage() {
             {detail && detail.total - detail.paidAmount > 0.009 ? (
               <Button variant="success" onClick={() => { openCollect(detail); setDetail(null); }}><IcCash size={15} /> Collect due</Button>
             ) : null}
-            <Button onClick={() => { setReceiptFor(detail); setDetail(null); }}><IcPrint size={15} /> Receipt</Button>
+            <Button onClick={() => { setA4For(detail); setDetail(null); }}><IcDoc size={15} /> A4 invoice</Button>
+            <Button variant="secondary" onClick={() => { setReceiptFor(detail); setDetail(null); }}><IcPrint size={15} /> Receipt</Button>
             <Button variant="danger" onClick={() => { setReturnFor(detail); setDetail(null); }}><IcRefresh size={15} /> Return items</Button>
           </div>
         }
@@ -217,11 +221,15 @@ export default function SalesPage() {
       <Modal open={!!receiptFor} onClose={() => setReceiptFor(null)} title="Receipt" footer={
         <div className="flex justify-end gap-2">
           <Button variant="secondary" onClick={() => setReceiptFor(null)}>Close</Button>
-          <Button onClick={() => window.print()}><IcPrint size={15} /> Print</Button>
+          {receiptFor ? <Button variant="secondary" onClick={() => { setA4For(receiptFor); setReceiptFor(null); }}><IcDoc size={15} /> A4 invoice</Button> : null}
+          <Button onClick={() => printIsolated("receipt-print", "receipt-printing")}><IcPrint size={15} /> Print</Button>
         </div>
       }>
-        {receiptFor ? <Receipt sale={receiptFor} shopName={db.settings.shopName} currency={currency} /> : null}
+        {receiptFor ? <Receipt sale={receiptFor} shopName={db.settings.shopName} currency={currency} logo={db.settings.logo} /> : null}
       </Modal>
+
+      {/* A4 invoice */}
+      {a4For ? <A4InvoiceModal sale={a4For} db={db} onClose={() => setA4For(null)} /> : null}
 
       {/* Return items */}
       {returnFor ? (

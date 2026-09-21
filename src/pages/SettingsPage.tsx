@@ -3,6 +3,7 @@ import { useApp } from "../App";
 import type { Settings, Branch } from "../types";
 import { updateSettings, exportBackup, validateBackup } from "../lib/store";
 import { uid } from "../lib/helpers";
+import { fileToResizedDataURL } from "../lib/image";
 import { Button, Card, CardHeader, Field, NumberInput, Select, TextInput, Toggle, useToast } from "../ui";
 import { IcDownload, IcStore } from "../icons";
 
@@ -84,11 +85,46 @@ export default function SettingsPage({ onReset }: { onReset: () => void }) {
       </div>
 
       <Card>
-        <CardHeader title="Shop profile" subtitle="Shown on the sidebar, receipts and reports" />
-        <div className="space-y-3 px-5 py-4">
-          <Field label="Shop name"><TextInput value={s.shopName} onChange={(e) => set("shopName", e.target.value)} /></Field>
-          <Field label="Tagline"><TextInput value={s.tagline} onChange={(e) => set("tagline", e.target.value)} placeholder="e.g. Grocery & Household" /></Field>
-          <Field label="Owner name"><TextInput value={s.ownerName} onChange={(e) => set("ownerName", e.target.value)} /></Field>
+        <CardHeader title="Shop profile & branding" subtitle="Logo, owner photo and company details — shown on the sidebar and printed on A4 invoices" />
+        <div className="space-y-4 px-5 py-4">
+          <div className="flex flex-wrap items-center gap-5">
+            {/* Company logo */}
+            <div>
+              <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-ink-500">Company logo</p>
+              <ImagePicker
+                value={s.logo ?? null}
+                shape="square"
+                onChange={(v) => setS((x) => ({ ...x, logo: v }))}
+                fallback={s.shopName.slice(0, 1).toUpperCase()}
+              />
+            </div>
+            {/* Owner photo */}
+            <div>
+              <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-ink-500">Owner photo</p>
+              <ImagePicker
+                value={s.ownerImage ?? null}
+                shape="round"
+                onChange={(v) => setS((x) => ({ ...x, ownerImage: v }))}
+                fallback={s.ownerName.slice(0, 1).toUpperCase() || "O"}
+              />
+            </div>
+            <div className="min-w-[180px] flex-1 space-y-3">
+              <Field label="Shop name"><TextInput value={s.shopName} onChange={(e) => set("shopName", e.target.value)} /></Field>
+              <Field label="Tagline"><TextInput value={s.tagline} onChange={(e) => set("tagline", e.target.value)} placeholder="e.g. Grocery & Household" /></Field>
+              <Field label="Owner name"><TextInput value={s.ownerName} onChange={(e) => set("ownerName", e.target.value)} /></Field>
+            </div>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Field label="Address"><TextInput value={s.address ?? ""} onChange={(e) => set("address", e.target.value)} placeholder="Street, area, city" /></Field>
+            <Field label="Business / VAT reg. no"><TextInput value={s.regNo ?? ""} onChange={(e) => set("regNo", e.target.value)} placeholder="e.g. BIN 004512789-0201" /></Field>
+            <Field label="Phone"><TextInput value={s.phone ?? ""} onChange={(e) => set("phone", e.target.value)} placeholder="+880 …" /></Field>
+            <Field label="Email"><TextInput value={s.email ?? ""} onChange={(e) => set("email", e.target.value)} placeholder="hello@yourshop.com" /></Field>
+            <Field label="Website"><TextInput value={s.website ?? ""} onChange={(e) => set("website", e.target.value)} placeholder="yourshop.com" /></Field>
+            <Field label="Invoice footer note"><TextInput value={s.invoiceNote ?? ""} onChange={(e) => set("invoiceNote", e.target.value)} placeholder="Return policy, thank-you note…" /></Field>
+          </div>
+          <p className="rounded-lg bg-brand-50 px-3 py-2 text-xs text-brand-700">
+            The logo appears on the sidebar, the A4 invoice header and receipts. The owner photo appears on invoices as the authorised signatory.
+          </p>
         </div>
       </Card>
 
@@ -214,6 +250,74 @@ export default function SettingsPage({ onReset }: { onReset: () => void }) {
           </div>
         </div>
       ) : null}
+    </div>
+  );
+}
+
+/** Click-to-upload (or drag & drop) image picker for logo / owner / staff photos. */
+export function ImagePicker({
+  value,
+  onChange,
+  shape = "square",
+  fallback,
+}: {
+  value: string | null;
+  onChange: (v: string | null) => void;
+  shape?: "square" | "round";
+  fallback?: string;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [over, setOver] = useState(false);
+  const toast = useToast();
+
+  const pick = (file?: File | null) => {
+    if (!file) return;
+    fileToResizedDataURL(file, 320, 0.85)
+      .then((data) => onChange(data))
+      .catch(() => toast("Please choose a valid image file", "error"));
+  };
+
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={() => inputRef.current?.click()}
+        onDragOver={(e) => { e.preventDefault(); setOver(true); }}
+        onDragLeave={() => setOver(false)}
+        onDrop={(e) => { e.preventDefault(); setOver(false); pick(e.dataTransfer.files?.[0]); }}
+        className={
+          "flex h-20 w-20 items-center justify-center overflow-hidden border-2 border-dashed transition-colors " +
+          (shape === "round" ? "rounded-full" : "rounded-xl") +
+          (over ? " border-brand-500 bg-brand-50" : " border-ink-300 bg-ink-50 hover:border-brand-400 hover:bg-brand-50/50")
+        }
+        title="Click to upload or drag & drop an image"
+      >
+        {value ? (
+          <img src={value} alt="Uploaded" className="h-full w-full object-cover" />
+        ) : (
+          <span className="flex flex-col items-center gap-0.5 text-ink-400">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+              <path d="M12 5v14M5 12h14" strokeLinecap="round" />
+            </svg>
+            {fallback ? <span className="text-sm font-bold text-ink-300">{fallback}</span> : null}
+          </span>
+        )}
+      </button>
+      <div className="mt-1 flex items-center justify-center gap-2 text-[11px]">
+        <button className="font-medium text-brand-600 hover:underline" onClick={() => inputRef.current?.click()}>
+          {value ? "Change" : "Upload"}
+        </button>
+        {value ? (
+          <button className="text-red-500 hover:underline" onClick={() => onChange(null)}>Remove</button>
+        ) : null}
+      </div>
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={(e) => { pick(e.target.files?.[0]); e.target.value = ""; }}
+      />
     </div>
   );
 }

@@ -101,6 +101,12 @@ export const IcEdit = (p: P) =>
 export const IcDownload = (p: P) =>
   base(p.size, p.className, <><path d="M12 4v11" /><path d="m7 11 5 5 5-5" /><path d="M5 20h14" /></>);
 
+export const IcDoc = (p: P) =>
+  base(p.size, p.className, <>
+    <path d="M7 3h7l5 5v11a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z" />
+    <path d="M14 3v5h5M9 13h6M9 17h6" />
+  </>);
+
 export const IcPrint = (p: P) =>
   base(p.size, p.className, <>
     <path d="M7 8V4h10v4" /><rect x="4" y="8" width="16" height="8" rx="1.5" /><path d="M7 14h10v6H7z" />
@@ -147,3 +153,17 @@ export const IcReceipt = (p: P) =>
 
 export const IcRefresh = (p: P) =>
   base(p.size, p.className, <><path d="M21 12a9 9 0 1 1-2.64-6.36" /><path d="M21 3v6h-6" /></>);
+
+export const IcEye = (p: P) =>
+  base(p.size, p.className, <>
+    <path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z" />
+    <circle cx="12" cy="12" r="3" />
+  </>);
+
+export const IcEyeOff = (p: P) =>
+  base(p.size, p.className, <>
+    <path d="M3 3l18 18" />
+    <path d="M10.6 5.8A9.8 9.8 0 0 1 12 5.5c6 0 9.5 6.5 9.5 6.5a17.5 17.5 0 0 1-2.4 3.2" />
+    <path d="M6.1 6.7A16.9 16.9 0 0 0 2.5 12S6 18.5 12 18.5a9.3 9.3 0 0 0 4-.9" />
+    <path d="M9.9 10.2a3 3 0 0 0 4.2 4.2" />
+  </>);

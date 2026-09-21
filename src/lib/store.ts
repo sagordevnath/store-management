@@ -16,6 +16,7 @@ import type {
   PriceTier,
 } from "../types";
 import { uid, round2, dayKey, startOfDay } from "./helpers";
+import { activeLocale, localizeDigits } from "./i18n";
 import { buildSeedDB } from "./seed";
 import { subtreeIds } from "./categories";
 import { customerLocation, initDelivery, stepDelivery } from "./delivery";
@@ -253,7 +254,7 @@ export function revenueByDay(db: DB, days: number): { label: string; value: numb
     const key = dayKey(d.toISOString());
     const daySales = db.sales.filter((s) => dayKey(s.at) === key);
     out.push({
-      label: d.toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+      label: localizeDigits(d.toLocaleDateString(activeLocale(), { month: "short", day: "numeric" })),
       value: round2(daySales.reduce((s, x) => s + x.total, 0)),
       profit: round2(daySales.reduce((s, x) => s + x.profit, 0)),
     });

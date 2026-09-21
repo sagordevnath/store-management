@@ -11,11 +11,12 @@ import {
   revenueSeries,
   topProductsInRange,
   expenseBreakdownInRange,
-  periodLabel,
-  periodName,
+  periodLabelKey,
+  periodNameKey,
   type PeriodKey,
 } from "../lib/period";
 import { AreaChart, BarChartH, Badge, Button, Card, CardHeader, Modal, Segmented, Th, Td } from "../ui";
+import { activeLocale, localizeDigits } from "../lib/i18n";
 
 // 3D revenue chart is code-split so it loads only when used.
 const Bar3DChart = lazy(() => import("../three/Bar3DChart"));
@@ -27,7 +28,7 @@ import {
 type StatKey = "sales" | "purchases" | "expenses" | "stock" | "payable" | "receivable";
 
 export default function DashboardPage() {
-  const { db, setDB, currency, navigate, sync } = useApp();
+  const { db, setDB, currency, navigate, sync, t } = useApp();
   const [period, setPeriod] = useState<PeriodKey>("today");
   const [refreshTick, setRefreshTick] = useState(0);
   const [openStat, setOpenStat] = useState<StatKey | null>(null);
@@ -136,27 +137,27 @@ export default function DashboardPage() {
     key: StatKey; label: string; value: number; icon: React.ReactNode; valueCls: string; iconCls: string; raw?: boolean;
   }[] = [
     {
-      key: "sales", label: `${periodLabel(period)} sales`, value: m.salesTotal,
+      key: "sales", label: `${t(periodLabelKey(period))} ${t("dash.sales")}`, value: m.salesTotal,
       icon: <IcTrend size={17} />, valueCls: "text-emerald-600", iconCls: "text-emerald-600",
     },
     {
-      key: "purchases", label: `${periodLabel(period)} purchases`, value: m.purchasesTotal,
+      key: "purchases", label: `${t(periodLabelKey(period))} ${t("dash.purchases")}`, value: m.purchasesTotal,
       icon: <IcCart size={17} />, valueCls: "text-blue-600", iconCls: "text-blue-600",
     },
     {
-      key: "expenses", label: `${periodLabel(period)} expenses`, value: m.expensesTotal,
+      key: "expenses", label: `${t(periodLabelKey(period))} ${t("dash.expenses")}`, value: m.expensesTotal,
       icon: <IcReceipt size={17} />, valueCls: "text-orange-500", iconCls: "text-orange-500",
     },
     {
-      key: "stock", label: "Total stock", value: m.stockQty,
+      key: "stock", label: t("dash.totalStock"), value: m.stockQty,
       icon: <IcBox size={17} />, valueCls: "text-ink-900", iconCls: "text-emerald-600", raw: true,
     },
     {
-      key: "payable", label: "Payable", value: m.payableTotal,
+      key: "payable", label: t("dash.payable"), value: m.payableTotal,
       icon: <IcWallet size={17} />, valueCls: "text-red-600", iconCls: "text-red-600",
     },
     {
-      key: "receivable", label: "Receivable", value: m.receivableTotal,
+      key: "receivable", label: t("dash.receivable"), value: m.receivableTotal,
       icon: <IcCash size={17} />, valueCls: "text-teal-600", iconCls: "text-teal-600",
     },
   ];
@@ -201,7 +202,7 @@ export default function DashboardPage() {
                     : "text-ink-500 hover:text-ink-800"
                 )}
               >
-                {p.label}
+                {t(p.labelKey)}
               </button>
             ))}
           </div>
@@ -221,23 +222,23 @@ export default function DashboardPage() {
                 <span className={c.iconCls}>{c.icon}</span>
               </div>
               <p className={classNames("mt-2 text-2xl font-bold tracking-tight", c.valueCls)}>
-                {c.raw ? String(c.value) : fmtMoney(c.value, currency)}
+                {c.raw ? localizeDigits(String(c.value)) : fmtMoney(c.value, currency)}
               </p>
               <p className="mt-1 text-[11px] text-ink-400">
                 {c.key === "stock"
-                  ? `${m.productCount} products · ${m.lowStock} low`
+                  ? t("dash.cardStock", { products: localizeDigits(String(m.productCount)), low: localizeDigits(String(m.lowStock)) })
                   : c.key === "sales"
-                    ? `${m.salesCount} orders · ${m.itemsSold} items`
+                    ? t("dash.cardSales", { orders: localizeDigits(String(m.salesCount)), items: localizeDigits(String(m.itemsSold)) })
                     : c.key === "purchases"
-                      ? `${m.purchasesCount} order${m.purchasesCount === 1 ? "" : "s"} · ${m.purchasesQty} items`
+                      ? t("dash.cardPurchases", { orders: localizeDigits(String(m.purchasesCount)), items: localizeDigits(String(m.purchasesQty)) })
                       : c.key === "expenses"
-                        ? `${m.expensesCount} entr${m.expensesCount === 1 ? "y" : "ies"}`
+                        ? t("dash.cardExpenses", { n: localizeDigits(String(m.expensesCount)) })
                         : c.key === "payable"
-                          ? `${m.payableSuppliers} suppliers to pay`
-                          : `${m.dueCustomers} customers owe`}
+                          ? t("dash.cardPayable", { n: localizeDigits(String(m.payableSuppliers)) })
+                          : t("dash.cardReceivable", { n: localizeDigits(String(m.dueCustomers)) })}
               </p>
               <p className="mt-1 text-[11px] font-medium text-brand-600 opacity-0 transition-opacity group-hover:opacity-100">
-                Click for details →
+                {t("dash.details")} →
               </p>
             </Card>
           </button>
@@ -261,7 +262,7 @@ export default function DashboardPage() {
             <div className="grid gap-3.5 lg:grid-cols-3">
               <Card className="lg:col-span-2">
                 <CardHeader
-                  title={`Revenue — ${periodName(period)}`}
+                  title={`${t("dash.revenue")} — ${t(periodNameKey(period))}`}
                   subtitle={m.rangeText}
                   action={
                     <span className="text-xs font-semibold text-ink-700">
@@ -291,7 +292,7 @@ export default function DashboardPage() {
               </Card>
 
               <Card>
-                <CardHeader title="Sales by category" subtitle={periodName(period).replace(/^./, (ch) => ch.toUpperCase())} />
+                <CardHeader title={t("dash.byCategory")} subtitle={t(periodNameKey(period))} />
                 <div className="px-5 py-5">
                   {cats.length ? <Donut categories={cats} currency={currency} /> : <p className="text-sm text-ink-400">No sales yet.</p>}
                 </div>
@@ -313,7 +314,7 @@ export default function DashboardPage() {
 
           {key === "forecast" && canForecast ? wrap("forecast", (
             <Card>
-              <CardHeader title="Cash-flow forecast" subtitle="Next 14 days · based on your last 30-day averages" />
+              <CardHeader title={t("dash.forecast")} subtitle={t("dash.forecastSub")} />
               <div className="px-4 pb-4 pt-2">
                 <AreaChart
                   data={forecast.map((f) => ({ label: f.label, value: Math.max(f.cum, 0) }))}
@@ -322,7 +323,7 @@ export default function DashboardPage() {
                 />
               </div>
               <div className="grid grid-cols-3 gap-px border-t border-ink-100 bg-ink-100">
-                {["Daily inflow", "Daily outflow", "14-day net"].map((l, i) => (
+                {[t("dash.inflow"), t("dash.outflow"), t("dash.net14")].map((l, i) => (
                   <div key={l} className="bg-white px-4 py-3">
                     <p className="text-[11px] text-ink-400">{l}</p>
                     <p className="mt-0.5 text-sm font-bold text-ink-900">
@@ -339,9 +340,9 @@ export default function DashboardPage() {
           {key === "target" && canTarget ? wrap("target", (
             <Card>
               <CardHeader
-                title="Monthly sales target"
-                subtitle={`${fmtMoney(mtd, currency)} of ${fmtMoney(target, currency)} · ${new Date().toLocaleDateString("en-US", { month: "long" })}`}
-                action={<Badge tone={targetPct >= 100 ? "green" : targetPct >= 60 ? "blue" : "amber"}>{targetPct}%</Badge>}
+                title={t("dash.target")}
+                subtitle={`${fmtMoney(mtd, currency)} ${t("dash.of")} ${fmtMoney(target, currency)} · ${localizeDigits(new Date().toLocaleDateString(activeLocale(), { month: "long" }))}`}
+                action={<Badge tone={targetPct >= 100 ? "green" : targetPct >= 60 ? "blue" : "amber"}>{localizeDigits(`${targetPct}%`)}</Badge>}
               />
               <div className="px-5 py-5">
                 <div className="h-3.5 w-full overflow-hidden rounded-full bg-ink-100">
@@ -368,9 +369,9 @@ export default function DashboardPage() {
       <div className="grid gap-3.5 lg:grid-cols-3">
         <Card className="lg:col-span-2">
           <CardHeader
-            title={`Recent sales — ${periodName(period)}`}
+            title={`${t("dash.revenue")} — ${t(periodNameKey(period))}`}
             subtitle={m.rangeText}
-            action={<Button variant="ghost" size="sm" onClick={() => navigate("sales")}>View all →</Button>}
+            action={<Button variant="ghost" size="sm" onClick={() => navigate("sales")}>{t("dash.viewAll")} →</Button>}
           />
           <div className="overflow-x-auto">
             <table className="w-full">
@@ -409,9 +410,9 @@ export default function DashboardPage() {
         <div className="space-y-3.5">
           <Card>
             <CardHeader
-              title="Low stock alerts"
-              subtitle="Reorder before you run out"
-              action={lowStock.length ? <Button variant="ghost" size="sm" onClick={() => navigate("products")}>Manage →</Button> : undefined}
+              title={t("dash.lowStock")}
+              subtitle={t("dash.reorderBefore")}
+              action={lowStock.length ? <Button variant="ghost" size="sm" onClick={() => navigate("products")}>{t("dash.manage")} →</Button> : undefined}
             />
             <div className="divide-y divide-ink-100">
               {lowStock.length === 0 ? (
@@ -423,7 +424,7 @@ export default function DashboardPage() {
                       <p className="truncate text-sm font-medium text-ink-800">{p.name}</p>
                       <p className="text-xs text-ink-400">{p.sku}</p>
                     </div>
-                    <Badge tone={p.stock === 0 ? "red" : "amber"}>{p.stock === 0 ? "Out of stock" : `${p.stock} left`}</Badge>
+                    <Badge tone={p.stock === 0 ? "red" : "amber"}>{p.stock === 0 ? t("dash.outOfStock") : localizeDigits(t("dash.left", { n: String(p.stock) }))}</Badge>
                   </div>
                 ))
               )}
@@ -432,8 +433,8 @@ export default function DashboardPage() {
 
           <Card>
             <CardHeader
-              title="Smart reorder"
-              subtitle="Velocity-based suggestions (Pro)"
+              title={t("dash.reorderTitle")}
+              subtitle={t("dash.reorderSub")}
               action={
                 canReorder && reorder.length ? (
                   <Button variant="ghost" size="sm" onClick={() => navigate("purchases")}>Draft PO →</Button>
@@ -454,7 +455,7 @@ export default function DashboardPage() {
                     <div className="min-w-0">
                       <p className="truncate text-sm font-medium text-ink-800">{r.product.name}</p>
                       <p className="text-xs text-ink-400">
-                        {r.daysCover === null ? "No sales velocity" : `${r.daysCover} days of cover left`}
+                        {r.daysCover === null ? t("dash.noVelocity") : localizeDigits(t("dash.daysCover", { n: String(r.daysCover) }))}
                       </p>
                     </div>
                     <Badge tone={r.daysCover !== null && r.daysCover < 3 ? "red" : "amber"}>+{r.suggestQty}</Badge>
@@ -466,8 +467,8 @@ export default function DashboardPage() {
 
           <Card>
             <CardHeader
-              title="Expiring soon"
-              subtitle="Batch expiry within 45 days"
+              title={t("dash.expiring")}
+              subtitle={t("dash.expiringSub")}
               action={expiring.length ? <Button variant="ghost" size="sm" onClick={() => navigate("products")}>Review →</Button> : undefined}
             />
             <div className="divide-y divide-ink-100">
@@ -478,10 +479,10 @@ export default function DashboardPage() {
                   <div key={p.id} className="flex items-center justify-between px-5 py-2.5">
                     <div className="min-w-0">
                       <p className="truncate text-sm font-medium text-ink-800">{p.name}</p>
-                      <p className="text-xs text-ink-400">{p.stock} {p.unit} in stock</p>
+                      <p className="text-xs text-ink-400">{localizeDigits(String(p.stock))} {p.unit} {t("dash.inStock")}</p>
                     </div>
                     <Badge tone={daysLeft <= 0 ? "red" : daysLeft <= 14 ? "amber" : "neutral"}>
-                      {daysLeft <= 0 ? "Expired" : `${daysLeft}d left`}
+                      {daysLeft <= 0 ? t("dash.expired") : localizeDigits(t("dash.daysLeft", { n: String(daysLeft) }))}
                     </Badge>
                   </div>
                 ))
@@ -491,8 +492,8 @@ export default function DashboardPage() {
 
           <Card>
             <CardHeader
-              title="Top dues to collect"
-              subtitle="Customers who owe the most"
+              title={t("dash.topDues")}
+              subtitle={t("dash.whoOwes")}
               action={dues.length ? <Button variant="ghost" size="sm" onClick={() => navigate("customers")}>Collect →</Button> : undefined}
             />
             <div className="divide-y divide-ink-100">
@@ -519,7 +520,7 @@ export default function DashboardPage() {
       {/* ===== Third row ===== */}
       <div className="grid gap-3.5 lg:grid-cols-3">
         <Card className="lg:col-span-2">
-          <CardHeader title="Best sellers" subtitle={`Ranked by profit · ${periodName(period)}`} />
+          <CardHeader title={t("dash.bestSellers")} subtitle={`${t("dash.rankedByProfit")} · ${t(periodNameKey(period))}`} />
           <div className="px-5 py-4">
             <BarChartH
               data={top.map((t) => ({ label: t.name, value: t.profit }))}
@@ -528,15 +529,15 @@ export default function DashboardPage() {
           </div>
         </Card>
         <Card>
-          <CardHeader title="Period summary" subtitle={m.rangeText} />
+          <CardHeader title={t("dash.periodSummary")} subtitle={m.rangeText} />
           <div className="grid grid-cols-2 gap-px overflow-hidden rounded-b-xl bg-ink-100">
             {[
-              ["Orders", String(m.salesCount)],
-              ["Items sold", String(m.itemsSold)],
-              ["Margin", m.salesTotal > 0 ? `${m.marginPct}%` : "—"],
-              ["Avg. order", fmtMoney(m.avgOrder, currency)],
-              ["Expenses", fmtMoney(m.expensesTotal, currency)],
-              ["Net cash", fmtMoney(m.collectedTotal - m.cashOut, currency)],
+              [t("dash.orders"), localizeDigits(String(m.salesCount))],
+              [t("dash.itemsSold"), localizeDigits(String(m.itemsSold))],
+              [t("dash.margin"), m.salesTotal > 0 ? localizeDigits(`${m.marginPct}%`) : "—"],
+              [t("dash.avgOrder"), fmtMoney(m.avgOrder, currency)],
+              [t("dash.expensesLbl"), fmtMoney(m.expensesTotal, currency)],
+              [t("dash.netCash"), fmtMoney(m.collectedTotal - m.cashOut, currency)],
             ].map(([label, value]) => (
               <div key={label} className="bg-white px-5 py-4">
                 <p className="text-xs text-ink-400">{label}</p>
@@ -613,10 +614,10 @@ function StatModal({
   period: PeriodKey;
   metrics: ReturnType<typeof periodMetrics>;
 }) {
-  const { db, currency, navigate } = useApp();
+  const { db, currency, navigate, t } = useApp();
   if (!statKey) return null;
   const m = metrics;
-  const pct = (a: number, b: number) => (b > 0 ? `${Math.round((a / b) * 100)}%` : "—");
+  const pct = (a: number, b: number) => (b > 0 ? `${localizeDigits(String(Math.round((a / b) * 100)))}%` : "—");
 
   const foot = (extra?: React.ReactNode) => (
     <>
@@ -627,19 +628,19 @@ function StatModal({
 
   const content: Record<StatKey, { title: string; sub: string; body: React.ReactNode }> = {
     sales: {
-      title: `${periodLabel(period)} sales`,
+      title: `${t(periodLabelKey(period))} ${t("dash.sales")}`,
       sub: m.rangeText,
       body: (
         <div className="space-y-4">
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <Mini label="Gross sales" value={fmtMoney(m.salesTotal, currency)} strong />
-            <Mini label="Orders" value={String(m.salesCount)} />
-            <Mini label="Items sold" value={String(m.itemsSold)} />
-            <Mini label="Avg. order" value={fmtMoney(m.avgOrder, currency)} />
+            <Mini label={t("dash.grossSales")} value={fmtMoney(m.salesTotal, currency)} strong />
+            <Mini label={t("dash.orders")} value={localizeDigits(String(m.salesCount))} />
+            <Mini label={t("dash.itemsSold")} value={localizeDigits(String(m.itemsSold))} />
+            <Mini label={t("dash.avgOrder")} value={fmtMoney(m.avgOrder, currency)} />
           </div>
           {m.prev ? (
             <p className="text-xs text-ink-500">
-              Previous comparable period: <b>{fmtMoney(m.prev.salesTotal, currency)}</b>{" "}
+              {t("dash.prevPeriod")}: <b>{fmtMoney(m.prev.salesTotal, currency)}</b>{" "}
               {m.prev.salesTotal > 0 ? (
                 <Badge tone={m.salesTotal >= m.prev.salesTotal ? "green" : "red"}>
                   {m.salesTotal >= m.prev.salesTotal ? "▲" : "▼"} {Math.abs(Math.round(((m.salesTotal - m.prev.salesTotal) / m.prev.salesTotal) * 100))}%
@@ -665,20 +666,20 @@ function StatModal({
       ),
     },
     purchases: {
-      title: `${periodLabel(period)} purchases`,
+      title: `${t(periodLabelKey(period))} ${t("dash.purchases")}`,
       sub: m.rangeText,
       body: (
         <div className="space-y-4">
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
             <Mini label="Purchases total" value={fmtMoney(m.purchasesTotal, currency)} strong />
-            <Mini label="Purchase orders" value={String(m.purchasesCount)} />
-            <Mini label="Items purchased" value={String(m.purchasesQty)} />
+            <Mini label={t("dash.poCount")} value={localizeDigits(String(m.purchasesCount))} />
+            <Mini label={t("dash.itemsPurchased")} value={localizeDigits(String(m.purchasesQty))} />
             <Mini label="Paid to suppliers" value={fmtMoney(m.purchasesPaid, currency)} />
             <Mini label="Unpaid (payable)" value={fmtMoney(m.payableIncurred, currency)} tone="text-red-600" />
           </div>
           {m.prev ? (
             <p className="text-xs text-ink-500">
-              Previous comparable period: <b>{fmtMoney(m.prev.purchasesTotal, currency)}</b>{" "}
+              {t("dash.prevPeriod")}: <b>{fmtMoney(m.prev.purchasesTotal, currency)}</b>{" "}
               {m.prev.purchasesTotal > 0 ? (
                 <Badge tone={m.purchasesTotal >= m.prev.purchasesTotal ? "green" : "red"}>
                   {m.purchasesTotal >= m.prev.purchasesTotal ? "▲" : "▼"} {Math.abs(Math.round(((m.purchasesTotal - m.prev.purchasesTotal) / m.prev.purchasesTotal) * 100))}%
@@ -694,7 +695,7 @@ function StatModal({
               .map((p) => ({
                 name: db.suppliers.find((s) => s.id === p.supplierId)?.name ?? "Walk-in supplier",
                 right: fmtMoney(p.total, currency),
-                sub: `${new Date(p.at).toLocaleDateString("en-US", { month: "short", day: "numeric" })} · ${p.items.length} item${p.items.length === 1 ? "" : "s"} · ${p.payment}`,
+                sub: `${localizeDigits(new Date(p.at).toLocaleDateString(activeLocale(), { month: "short", day: "numeric" }))} · ${localizeDigits(String(p.items.length))} ${t("pos.items")} · ${p.payment}`,
               }))}
             empty="No purchases in this period."
             title="Largest purchase orders in period"
@@ -703,19 +704,19 @@ function StatModal({
       ),
     },
     expenses: {
-      title: `${periodLabel(period)} expenses`,
+      title: `${t(periodLabelKey(period))} ${t("dash.expenses")}`,
       sub: m.rangeText,
       body: (
         <div className="space-y-4">
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             <Mini label="Total expenses" value={fmtMoney(m.expensesTotal, currency)} strong tone="text-orange-600" />
-            <Mini label="Entries" value={String(m.expensesCount)} />
+            <Mini label={t("dash.entries")} value={localizeDigits(String(m.expensesCount))} />
             <Mini label="Avg. per entry" value={m.expensesCount ? fmtMoney(m.expensesTotal / m.expensesCount, currency) : fmtMoney(0, currency)} />
             <Mini label="% of sales" value={pct(m.expensesTotal, m.salesTotal)} />
           </div>
           {m.prev ? (
             <p className="text-xs text-ink-500">
-              Previous comparable period: <b>{fmtMoney(m.prev.expensesTotal, currency)}</b>{" "}
+              {t("dash.prevPeriod")}: <b>{fmtMoney(m.prev.expensesTotal, currency)}</b>{" "}
               {m.prev.expensesTotal > 0 ? (
                 <Badge tone={m.expensesTotal <= m.prev.expensesTotal ? "green" : "red"}>
                   {m.expensesTotal <= m.prev.expensesTotal ? "▼" : "▲"} {Math.abs(Math.round(((m.expensesTotal - m.prev.expensesTotal) / m.prev.expensesTotal) * 100))}%
@@ -736,12 +737,12 @@ function StatModal({
       ),
     },
     stock: {
-      title: "Total stock",
+      title: t("dash.totalStock"),
       sub: "Live inventory snapshot",
       body: (
         <div className="space-y-4">
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-            <Mini label="Units in stock" value={String(m.stockQty)} strong />
+            <Mini label={t("dash.unitsInStock")} value={localizeDigits(String(m.stockQty))} strong />
             <Mini label="Products" value={String(m.productCount)} />
             <Mini label="Stock value (cost)" value={fmtMoney(m.stockValue, currency)} />
             <Mini label="Retail value" value={fmtMoney(m.stockRetail, currency)} />
@@ -772,8 +773,8 @@ function StatModal({
         <div className="space-y-4">
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
             <Mini label="Total payable" value={fmtMoney(m.payableTotal, currency)} strong tone="text-red-600" />
-            <Mini label="Suppliers owed" value={String(m.payableSuppliers)} />
-            <Mini label={`New payable ${periodName(period)}`} value={fmtMoney(m.payableIncurred, currency)} />
+            <Mini label={t("dash.suppliersOwed")} value={localizeDigits(String(m.payableSuppliers))} />
+            <Mini label={`${t("dash.newPayable")} ${t(periodNameKey(period))}`} value={fmtMoney(m.payableIncurred, currency)} />
           </div>
           <TopList
             rows={db.suppliers
@@ -795,8 +796,8 @@ function StatModal({
         <div className="space-y-4">
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
             <Mini label="Total receivable" value={fmtMoney(m.receivableTotal, currency)} strong tone="text-teal-600" />
-            <Mini label="Customers owing" value={String(m.dueCustomers)} />
-            <Mini label={`New receivable ${periodName(period)}`} value={fmtMoney(m.receivableIncurred, currency)} />
+            <Mini label={t("dash.customersOwing")} value={localizeDigits(String(m.dueCustomers))} />
+            <Mini label={`${t("dash.newReceivable")} ${t(periodNameKey(period))}`} value={fmtMoney(m.receivableIncurred, currency)} />
           </div>
           <TopList
             rows={db.customers

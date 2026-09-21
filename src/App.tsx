@@ -5,6 +5,8 @@ import { syncEngine, type SyncSnapshot } from "./lib/sync";
 import { tickSubscriptions, daysLeft } from "./lib/billing";
 import { planName, subStateSummary, hasFeature } from "./lib/plans";
 import { fmtMoney, initials, classNames } from "./lib/helpers";
+import { getStoredLang, storeLang, makeT, langInfo, setActiveLang, type Lang, type TFn } from "./lib/i18n";
+import { LanguageMenu } from "./LanguageMenu";
 import { Badge, Button, Card, Modal, ToastProvider, useDarkMode, useToast } from "./ui";
 import {
   IcDashboard, IcCart, IcBox, IcSale, IcTruck, IcUsers, IcBuilding, IcWallet,
@@ -36,24 +38,24 @@ export type PageKey =
   | "billing" | "tools" | "returns";
 
 const NAV: { key: PageKey; label: string; icon: (p: { size?: number; className?: string }) => React.ReactNode; group: string }[] = [
-  { key: "dashboard", label: "Dashboard", icon: IcDashboard, group: "Overview" },
-  { key: "pos", label: "Point of Sale", icon: IcCart, group: "Daily Operations" },
-  { key: "sales", label: "Sales & Invoices", icon: IcSale, group: "Daily Operations" },
-  { key: "purchases", label: "Purchases", icon: IcTruck, group: "Daily Operations" },
-  { key: "returns", label: "Returns & Refunds", icon: IcRefresh, group: "Daily Operations" },
-  { key: "products", label: "Products & Stock", icon: IcBox, group: "Catalog" },
-  { key: "categories", label: "Categories", icon: IcCategories, group: "Catalog" },
-  { key: "customers", label: "Customers", icon: IcUsers, group: "People" },
-  { key: "suppliers", label: "Suppliers", icon: IcBuilding, group: "People" },
-  { key: "staff", label: "Staff", icon: IcStaff, group: "People" },
-  { key: "expenses", label: "Expenses", icon: IcWallet, group: "Finance" },
-  { key: "reports", label: "Reports", icon: IcChart, group: "Finance" },
-  { key: "tools", label: "Tools & Extras", icon: IcTools, group: "Finance" },
-  { key: "billing", label: "Billing & Plan", icon: IcCrown, group: "Account" },
-  { key: "settings", label: "Settings", icon: IcSettings, group: "Account" },
+  { key: "dashboard", label: "nav.dashboard", icon: IcDashboard, group: "group.overview" },
+  { key: "pos", label: "nav.pos", icon: IcCart, group: "group.daily" },
+  { key: "sales", label: "nav.sales", icon: IcSale, group: "group.daily" },
+  { key: "purchases", label: "nav.purchases", icon: IcTruck, group: "group.daily" },
+  { key: "returns", label: "nav.returns", icon: IcRefresh, group: "group.daily" },
+  { key: "products", label: "nav.products", icon: IcBox, group: "group.catalog" },
+  { key: "categories", label: "nav.categories", icon: IcCategories, group: "group.catalog" },
+  { key: "customers", label: "nav.customers", icon: IcUsers, group: "group.people" },
+  { key: "suppliers", label: "nav.suppliers", icon: IcBuilding, group: "group.people" },
+  { key: "staff", label: "nav.staff", icon: IcStaff, group: "group.people" },
+  { key: "expenses", label: "nav.expenses", icon: IcWallet, group: "group.finance" },
+  { key: "reports", label: "nav.reports", icon: IcChart, group: "group.finance" },
+  { key: "tools", label: "nav.tools", icon: IcTools, group: "group.finance" },
+  { key: "billing", label: "nav.billing", icon: IcCrown, group: "group.account" },
+  { key: "settings", label: "nav.settings", icon: IcSettings, group: "group.account" },
 ];
 
-const NAV_GROUPS = ["Overview", "Daily Operations", "Catalog", "People", "Finance", "Account"];
+const NAV_GROUPS = ["group.overview", "group.daily", "group.catalog", "group.people", "group.finance", "group.account"];
 
 export interface Ctx {
   db: DB;
@@ -62,6 +64,9 @@ export interface Ctx {
   navigate: (p: PageKey) => void;
   currency: string;
   sync: SyncSnapshot;
+  lang: Lang;
+  setLang: (l: Lang) => void;
+  t: TFn;
 }
 
 const CtxReact = React.createContext<Ctx | null>(null);
@@ -73,6 +78,19 @@ export function useApp(): Ctx {
 
 export default function App() {
   const [db, setDb] = useState<DB | null>(null);
+  const [lang, setLangState] = useState<Lang>(getStoredLang);
+  const t = useMemo(() => makeT(lang), [lang]);
+  setActiveLang(lang); // keep pure formatters (fmtMoney, fmtDate…) in the UI language
+  const setLang = (l: Lang) => {
+    setLangState(l);
+    storeLang(l);
+  };
+
+  // Document language + text direction (Arabic flips to RTL).
+  useEffect(() => {
+    document.documentElement.lang = lang;
+    document.documentElement.dir = langInfo(lang).dir;
+  }, [lang]);
   const [page, setPage] = useState<PageKey>(() => {
     const h = window.location.hash.replace("#", "");
     return (NAV.some((n) => n.key === h) ? h : "dashboard") as PageKey;
@@ -110,19 +128,6 @@ export default function App() {
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
 
-  if (superAdmin) return <SuperAdminPage />;
-
-  if (!db) return null;
-
-  // Subscription lifecycle tick at boot.
-  const ticked = tickSubscriptions(db);
-  if (ticked !== db) {
-    setDb(ticked);
-    saveDB(ticked);
-    syncEngine.recordChange(db, ticked);
-    return null;
-  }
-
   const update = (fn: (db: DB) => DB) => {
     setDb((prev) => {
       if (!prev) return prev;
@@ -133,7 +138,20 @@ export default function App() {
     });
   };
 
-  const ctx: Ctx = { db, setDB: setDb, update, navigate: setPage, currency: db.settings.currency, sync };
+  useEffect(() => {
+    if (!db) return;
+    const ticked = tickSubscriptions(db);
+    if (ticked === db) return;
+    setDb(ticked);
+    saveDB(ticked);
+    syncEngine.recordChange(db, ticked);
+  }, [db]);
+
+  if (superAdmin) return <SuperAdminPage />;
+
+  if (!db) return null;
+
+  const ctx: Ctx = { db, setDB: setDb, update, navigate: setPage, currency: db.settings.currency, sync, lang, setLang, t };
 
   return (
     <CtxReact.Provider value={ctx}>
@@ -180,6 +198,7 @@ function Shell({
   const [dark, toggleDark] = useDarkMode();
   const [chatOpen, setChatOpen] = useState(false);
   const toast = useToast();
+  const { t } = useApp();
   const sub = db.subscription;
   const subState = subStateSummary(sub);
 
@@ -208,9 +227,13 @@ function Shell({
       {/* Sidebar */}
       <aside className={classNamesSidebar(sidebarOpen)}>
         <div className="flex h-16 items-center gap-2.5 border-b border-white/10 px-5">
-          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-brand-500 shadow-lg shadow-brand-500/30">
-            <IcStore size={18} className="text-white" />
-          </div>
+          {db.settings.logo ? (
+            <img src={db.settings.logo} alt="Logo" className="h-9 w-9 shrink-0 rounded-xl object-cover shadow-lg" />
+          ) : (
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-brand-500 shadow-lg shadow-brand-500/30">
+              <IcStore size={18} className="text-white" />
+            </div>
+          )}
           <div className="min-w-0">
             <p className="truncate text-sm font-bold text-white">{db.settings.shopName}</p>
             <p className="truncate text-[11px] text-white/50">{db.settings.tagline}</p>
@@ -219,7 +242,7 @@ function Shell({
         <nav className="flex-1 space-y-6 overflow-y-auto px-3 py-4">
           {NAV_GROUPS.map((group) => (
             <div key={group}>
-              <p className="mb-1.5 px-2.5 text-[10px] font-bold uppercase tracking-widest text-white/35">{group}</p>
+              <p className="mb-1.5 px-2.5 text-[10px] font-bold uppercase tracking-widest text-white/35">{t(group)}</p>
               <div className="space-y-0.5">
                 {NAV.filter((n) => n.group === group).map((n) => (
                   <button
@@ -231,7 +254,7 @@ function Shell({
                     )}
                   >
                     {n.icon({ size: 17 })}
-                    <span>{n.label}</span>
+                    <span>{t(n.label)}</span>
                     {n.key === "products" && kpis.lowStockCount > 0 ? (
                       <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-amber-400/90 px-1.5 text-[10px] font-bold text-ink-900">
                         {kpis.lowStockCount}
@@ -250,13 +273,24 @@ function Shell({
           ))}
         </nav>
         <div className="border-t border-white/10 p-3">
-          <div className="flex items-center gap-2.5 rounded-lg px-2 py-2">
-            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-brand-500/40 text-xs font-bold text-white">
-              {initials(db.settings.ownerName)}
-            </div>
+          <div className="rounded-xl border border-white/10 bg-white/[0.06] p-1.5 shadow-lg shadow-black/20 backdrop-blur">
+            <LanguageMenu variant="dark-row" placement="top-right" />
+            <div className="mx-1.5 my-1 border-t border-white/10" />
+            <div className="flex items-center gap-2.5 rounded-lg px-1.5 py-1">
+            {db.settings.ownerImage ? (
+              <img
+                src={db.settings.ownerImage}
+                alt={db.settings.ownerName || "Owner"}
+                className="h-9 w-9 shrink-0 rounded-full border-2 border-white/25 object-cover shadow"
+              />
+            ) : (
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-brand-500/40 text-xs font-bold text-white">
+                {initials(db.settings.ownerName)}
+              </div>
+            )}
             <div className="min-w-0 flex-1">
               <p className="truncate text-xs font-semibold text-white">{db.settings.ownerName}</p>
-              <p className="text-[10px] text-white/45">Owner</p>
+              <p className="text-[10px] text-white/45">{t("common.owner")}</p>
             </div>
             <button
               onClick={toggleDark}
@@ -268,6 +302,7 @@ function Shell({
             <button onClick={onLogout} title="Sign out" className="rounded-md p-1.5 text-white/50 hover:bg-white/10 hover:text-white">
               <IcLogout size={16} />
             </button>
+          </div>
           </div>
         </div>
       </aside>
@@ -284,7 +319,7 @@ function Shell({
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search products, categories, customers, invoices…"
+              placeholder={t("common.search")}
               className="h-10 w-full rounded-lg border border-ink-200 bg-ink-50/60 pl-9 pr-9 text-sm placeholder-ink-400 focus:border-brand-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-500/25"
             />
             {query ? (
@@ -310,7 +345,7 @@ function Shell({
           <div className="ml-auto flex items-center gap-2.5">
             <SyncPill sync={sync} />
             <div className="hidden text-right md:block">
-              <p className="text-[11px] text-ink-400">Cash on hand</p>
+              <p className="text-[11px] text-ink-400">{t("common.cashOnHand")}</p>
               <p className="text-sm font-bold text-ink-900">{fmtMoney(kpis.cashOnHand, db.settings.currency)}</p>
             </div>
             {lowStock.length > 0 ? (
@@ -326,7 +361,7 @@ function Shell({
               </button>
             ) : null}
             <Button variant="primary" size="md" onClick={() => onNavigate("pos")}>
-              <IcCart size={16} /> New Sale
+              <IcCart size={16} /> {t("common.newSale")}
             </Button>
           </div>
         </header>

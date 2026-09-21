@@ -136,6 +136,8 @@ export function mrr(reg: Registry): number {
     .reduce((sum, s) => sum + MONTHLY[s.plan], 0);
 }
 
+import { activeLocale, localizeDigits } from "./i18n";
+
 export function signupsByMonth(reg: Registry, months = 6): { label: string; value: number }[] {
   const out: { label: string; value: number }[] = [];
   const now = new Date();
@@ -143,7 +145,7 @@ export function signupsByMonth(reg: Registry, months = 6): { label: string; valu
     const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
     const prefix = d.toISOString().slice(0, 7);
     const value = reg.subscribers.filter((s) => s.joinedAt.slice(0, 7) === prefix).length;
-    out.push({ label: d.toLocaleDateString("en-US", { month: "short" }), value });
+    out.push({ label: localizeDigits(d.toLocaleDateString(activeLocale(), { month: "short" })), value });
   }
   return out;
 }

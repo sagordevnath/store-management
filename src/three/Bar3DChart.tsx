@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeometry.js";
+import { activeLocale, localizeDigits } from "../lib/i18n";
 
 /**
  * Interactive 3D bar chart rendered with Three.js.
@@ -33,7 +34,7 @@ export default function Bar3DChart({
     const fmt = (v: number) =>
       formatValue
         ? formatValue(v)
-        : v.toLocaleString("en-US", { maximumFractionDigits: 0 });
+        : localizeDigits(v.toLocaleString(activeLocale(), { maximumFractionDigits: 0 }));
 
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));

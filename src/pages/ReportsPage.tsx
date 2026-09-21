@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useApp } from "../App";
-import { fmtMoney, fmtCompact, downloadCSV } from "../lib/helpers";
+import { fmtMoney, fmtCompact, fmtDate, fmtDateTime, downloadCSV } from "../lib/helpers";
 import { hasFeature } from "../lib/plans";
 import { categoryReport } from "../lib/categories";
 import {
@@ -21,7 +21,7 @@ import { IcDownload } from "../icons";
 type Tab = "pl" | "category" | "expenses";
 
 export default function ReportsPage() {
-  const { db, currency, navigate } = useApp();
+  const { db, currency, navigate, t } = useApp();
   const [period, setPeriod] = useState<PeriodKey>("monthly");
   const [tab, setTab] = useState<Tab>("pl");
   const canCategory = hasFeature(db.subscription, "categories_report");
@@ -94,7 +94,7 @@ export default function ReportsPage() {
           </p>
         </div>
         <Segmented
-          options={PERIODS.map((p) => ({ value: p.value, label: p.label }))}
+          options={PERIODS.map((p) => ({ value: p.value, label: t(p.labelKey) }))}
           value={period}
           onChange={(v) => setPeriod(v as PeriodKey)}
         />
@@ -362,7 +362,7 @@ export default function ReportsPage() {
                   onClick={() =>
                     downloadCSV("expenses.csv", [
                       ["Date", "Category", "Description", "Amount"],
-                      ...logRows.map((e) => [new Date(e.at).toLocaleString("en-US"), e.category, e.description, e.amount]),
+                      ...logRows.map((e) => [fmtDateTime(e.at), e.category, e.description, e.amount]),
                     ])
                   }
                 >
@@ -383,7 +383,7 @@ export default function ReportsPage() {
                 <tbody className="divide-y divide-ink-100">
                   {logRows.map((e) => (
                     <tr key={e.id} className="hover:bg-ink-50/60">
-                      <Td className="whitespace-nowrap text-ink-500">{new Date(e.at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</Td>
+                      <Td className="whitespace-nowrap text-ink-500">{fmtDate(e.at)}</Td>
                       <Td><Badge tone="neutral">{e.category}</Badge></Td>
                       <Td className="font-medium text-ink-900">{e.description}</Td>
                       <Td className="text-right font-semibold text-red-600">{fmtMoney(e.amount, currency)}</Td>

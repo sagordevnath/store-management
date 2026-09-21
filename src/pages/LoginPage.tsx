@@ -1,11 +1,14 @@
 import { Suspense, lazy, useState } from "react";
 import { Button, Field, TextInput } from "../ui";
 import { IcStore, IcCheck } from "../icons";
+import { useApp } from "../App";
+import { LanguageMenu } from "../LanguageMenu";
 
 // Three.js hero is code-split so the main bundle stays lean.
 const LoginHero3D = lazy(() => import("../three/LoginHero3D"));
 
 export function LoginPage({ onLogin, shopName }: { onLogin: () => void; shopName: string }) {
+  const { t } = useApp();
   const [email, setEmail] = useState("owner@brightleaf.market");
   const [password, setPassword] = useState("demo1234");
   const [err, setErr] = useState("");
@@ -14,7 +17,7 @@ export function LoginPage({ onLogin, shopName }: { onLogin: () => void; shopName
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!email.includes("@") || password.length < 4) {
-      setErr("Enter a valid email and a password of at least 4 characters.");
+      setErr(t("login.err"));
       return;
     }
     setBusy(true);
@@ -45,18 +48,17 @@ export function LoginPage({ onLogin, shopName }: { onLogin: () => void; shopName
         </div>
         <div className="relative z-10 max-w-md">
           <h1 className="text-3xl font-extrabold leading-tight">
-            Run your entire shop from one professional dashboard.
+            {t("login.heroTitle")}
           </h1>
           <p className="mt-4 text-sm leading-relaxed text-white/65">
-            Point of sale, inventory, purchases, expenses, customer dues and profit reports — connected, automated and
-            always in sync. Built for modern retail.
+            {t("login.heroSub")}
           </p>
           <ul className="mt-8 space-y-3.5">
             {[
-              "Lightning-fast POS with barcode-ready checkout",
-              "Live inventory with low-stock alerts",
-              "Digital ledger to recover customer dues faster",
-              "Daily profit & loss with bank-ready reports",
+              t("login.feature1"),
+              t("login.feature2"),
+              t("login.feature3"),
+              t("login.feature4"),
             ].map((t) => (
               <li key={t} className="flex items-start gap-3 text-sm text-white/80">
                 <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-brand-500/30 text-brand-300">
@@ -73,7 +75,11 @@ export function LoginPage({ onLogin, shopName }: { onLogin: () => void; shopName
       </div>
 
       {/* Right form */}
-      <div className="flex flex-1 items-center justify-center bg-white px-6 py-12">
+      <div className="relative flex flex-1 items-center justify-center bg-white px-6 py-12">
+        {/* Language switcher — pick a language before signing in */}
+        <div className="absolute right-5 top-5 z-20">
+          <LanguageMenu variant="light" placement="bottom-right" />
+        </div>
         <div className="w-full max-w-sm">
           <div className="mb-8 flex items-center gap-2.5 lg:hidden">
             <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-brand-600">
@@ -84,14 +90,14 @@ export function LoginPage({ onLogin, shopName }: { onLogin: () => void; shopName
               <p className="text-xs text-ink-500">Business Manager</p>
             </div>
           </div>
-          <h2 className="text-2xl font-bold text-ink-900">Welcome back</h2>
-          <p className="mt-1.5 text-sm text-ink-500">Sign in to manage {shopName}.</p>
+          <h2 className="text-2xl font-bold text-ink-900">{t("login.welcome")}</h2>
+          <p className="mt-1.5 text-sm text-ink-500">{t("login.signInTo")} {shopName}.</p>
 
           <form onSubmit={submit} className="mt-8 space-y-4">
-            <Field label="Email address">
+            <Field label={t("login.email")}>
               <TextInput value={email} onChange={(e) => setEmail(e.target.value)} type="email" placeholder="you@shop.com" />
             </Field>
-            <Field label="Password">
+            <Field label={t("login.password")}>
               <TextInput
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
@@ -102,16 +108,16 @@ export function LoginPage({ onLogin, shopName }: { onLogin: () => void; shopName
             <div className="flex items-center justify-between text-xs">
               <label className="flex items-center gap-2 text-ink-600">
                 <input type="checkbox" defaultChecked className="h-3.5 w-3.5 rounded border-ink-300 text-brand-600 focus:ring-brand-500" />
-                Keep me signed in
+                {t("login.keep")}
               </label>
-              <a href="#" className="font-medium text-brand-600 hover:text-brand-700">Forgot password?</a>
+              <a href="#" className="font-medium text-brand-600 hover:text-brand-700">{t("login.forgot")}</a>
             </div>
             {err ? <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-600">{err}</p> : null}
             <Button type="submit" size="lg" className="w-full" disabled={busy}>
-              {busy ? "Signing in…" : "Sign in to dashboard"}
+              {busy ? t("login.signingIn") : t("login.signIn")}
             </Button>
             <p className="pt-1 text-center text-xs text-ink-400">
-              Demo credentials are pre-filled — just press <span className="font-semibold text-ink-600">Sign in</span>.
+              {t("login.demoHint")} <span className="font-semibold text-ink-600">{t("login.signIn")}</span>.
             </p>
           </form>
         </div>
