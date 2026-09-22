@@ -1,7 +1,9 @@
 import { useMemo, useState } from "react";
 import { useApp } from "../App";
 import type { Expense, ExpenseCategory } from "../types";
-import { addExpense, deleteExpense } from "../lib/store";
+import { addExpense } from "../lib/store";
+import { softDelete } from "../lib/recycle";
+import { logAudit } from "../lib/audit";
 import { fmtMoney, fmtDate, uid, downloadCSV } from "../lib/helpers";
 import {
   PERIODS,
@@ -131,7 +133,7 @@ export default function ExpensesPage() {
                         <button
                           className="text-ink-300 hover:text-red-500"
                           title="Delete expense"
-                          onClick={() => { update((d) => deleteExpense(d, e.id)); toast("Expense removed", "info"); }}
+                          onClick={() => { update((d) => { const next = softDelete(d, "expense", e.id, d.settings.ownerName); return { ...next, audit: logAudit(next.audit, "delete", "Expense", e.category, "Moved to recycle bin") }; }); toast("Moved to recycle bin — restore within 30 days", "info"); }}
                         >
                           <IcTrash size={14} />
                         </button>

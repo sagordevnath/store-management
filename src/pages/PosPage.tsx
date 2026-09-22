@@ -7,7 +7,8 @@ import { hasFeature } from "../lib/plans";
 import { productsInSubtree } from "../lib/categories";
 import type { Sale, PriceTier } from "../types";
 import { Badge, Button, Card, CategoryChips, Field, Modal, NumberInput, Select, SignPad, TextArea, TextInput, VoiceButton, useToast } from "../ui";
-import { IcSearch, IcPlus, IcTrash, IcPrint, IcCart, IcCheck, IcCash, IcDoc, IcEye, IcEyeOff } from "../icons";
+import { IcSearch, IcPlus, IcTrash, IcPrint, IcCart, IcCheck, IcCash, IcDoc, IcEye, IcEyeOff, IcScan } from "../icons";
+import { BarcodeScannerModal } from "./BarcodeScanner";
 import { A4InvoiceModal } from "./A4Invoice";
 import { printIsolated } from "../lib/print";
 
@@ -35,6 +36,7 @@ export default function PosPage() {
   const [branchId, setBranchId] = useState<string>(db.branches[0]?.id ?? "");
   const [marginsOpen, setMarginsOpen] = useState(false); // global "margin peek" mode
   const [revealedLines, setRevealedLines] = useState<Set<string>>(new Set()); // per-line eyes
+  const [scanOpen, setScanOpen] = useState(false); // camera barcode scanner
 
   const sub = db.subscription;
   const showChips = hasFeature(sub, "categories_nested");
@@ -183,7 +185,26 @@ export default function PosPage() {
             <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink-400"><IcSearch size={15} /></span>
             <TextInput
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              onChange={(e) => {
+                setSearch(e.target.value);
+                // Barcode scanners type the code then press Enter — jump straight into the cart.
+                const hit = db.products.find((p) => p.barcode && p.barcode === e.target.value.trim());
+                if (hit) {
+                  addToCart(hit.id);
+                  setSearch("");
+                }
+              }}
+              onKeyDown={(e) => {
+                if (e.key !== "Enter") return;
+                const q = search.trim().toLowerCase();
+                const hit = db.products.find(
+                  (p) => p.forRetailSale !== false && ((p.barcode ?? "").toLowerCase() === q || p.sku.toLowerCase() === q || p.name.toLowerCase() === q),
+                );
+                if (hit) {
+                  addToCart(hit.id);
+                  setSearch("");
+                }
+              }}
               placeholder="Search or scan barcode…"
               className="pl-9"
             />
@@ -199,6 +220,13 @@ export default function PosPage() {
             className="rounded-lg border border-ink-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-ink-600 hover:bg-ink-50"
           >
             {voiceLang === "en-US" ? "EN" : "বাং"}
+          </button>
+          <button
+            onClick={() => setScanOpen(true)}
+            title="Scan a product barcode with the camera"
+            className="flex items-center gap-1.5 rounded-lg border border-ink-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-ink-600 hover:bg-ink-50"
+          >
+            <IcScan size={15} /> Scan
           </button>
           {showChips ? <CategoryChips db={db} value={category} onChange={setCategory} /> : null}
         </div>
@@ -607,6 +635,22 @@ export default function PosPage() {
 
       {/* A4 invoice */}
       {a4For ? <A4InvoiceModal sale={a4For} db={db} onClose={() => setA4For(null)} /> : null}
+      {scanOpen ? (
+        <BarcodeScannerModal
+          onClose={() => setScanOpen(false)}
+          onCode={(code) => {
+            const hit = db.products.find((p) => p.forRetailSale !== false && (p.barcode ?? "").toLowerCase() === code.toLowerCase())
+              ?? db.products.find((p) => p.forRetailSale !== false && p.sku.toLowerCase() === code.toLowerCase());
+            if (hit) {
+              addToCart(hit.id);
+              toast(`${hit.name} added to cart`);
+            } else {
+              toast(`No product matches code "${code}"`, "error");
+              setSearch(code);
+            }
+          }}
+        />
+      ) : null}
     </div>
   );
 }
@@ -678,3 +722,4 @@ export function Receipt({ sale, shopName, currency, logo }: { sale: Sale; shopNa
     </div>
   );
 }
+

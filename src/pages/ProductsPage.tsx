@@ -1,12 +1,15 @@
 import { useMemo, useRef, useState } from "react";
 import { useApp } from "../App";
 import type { Product } from "../types";
-import { upsertProduct, deleteProduct, restock } from "../lib/store";
+import { upsertProduct, restock } from "../lib/store";
+import { softDelete } from "../lib/recycle";
+import { logAudit } from "../lib/audit";
 import { fmtMoney, uid, round2, downloadCSV, classNames } from "../lib/helpers";
 import { hasFeature, limitFor } from "../lib/plans";
 import { buildTree, categoryPathLabel, productsInSubtree, suggestCategory, UNCATEGORIZED_ID } from "../lib/categories";
 import { Badge, Button, Card, CategoryChips, Field, LockedCard, Modal, NumberInput, Select, TextInput, TextArea, Toggle, useToast, Th, Td } from "../ui";
-import { IcPlus, IcSearch, IcEdit, IcTrash, IcDownload, IcBox } from "../icons";
+import { IcPlus, IcSearch, IcEdit, IcTrash, IcDownload, IcBox, IcScan } from "../icons";
+import { BarcodeLabelSheet } from "./BarcodeLabelSheet";
 
 const UNITS = ["pcs", "kg", "g", "litre", "ml", "box", "pack", "bag", "bottle", "dozen", "set", "unit"];
 
@@ -96,6 +99,8 @@ export default function ProductsPage() {
     });
   };
 
+  const [labelFor, setLabelFor] = useState<Product[] | null>(null);
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -126,6 +131,9 @@ export default function ProductsPage() {
             }
           >
             <IcDownload size={15} /> Export
+          </Button>
+          <Button variant="secondary" onClick={() => setLabelFor(filtered.length ? filtered : db.products)} title="Print barcode labels for these products">
+            <IcScan size={15} /> Labels
           </Button>
           <Button onClick={openNew}>
             <IcPlus size={16} /> Add product
@@ -237,7 +245,7 @@ export default function ProductsPage() {
         footer={
           <div className="flex justify-end gap-2">
             <Button variant="secondary" onClick={() => setConfirmDelete(null)}>Cancel</Button>
-            <Button variant="danger" onClick={() => { update((d) => deleteProduct(d, confirmDelete!.id)); toast("Product deleted", "info"); setConfirmDelete(null); }}>
+            <Button variant="danger" onClick={() => { const name = confirmDelete!.name; update((d) => { const next = softDelete(d, "product", confirmDelete!.id, d.settings.ownerName); return { ...next, audit: logAudit(next.audit, "delete", "Product", name, "Moved to recycle bin") }; }); toast("Moved to recycle bin — restore within 30 days", "info"); setConfirmDelete(null); }}>
               Delete
             </Button>
           </div>
@@ -248,6 +256,8 @@ export default function ProductsPage() {
           Past sales records are not affected.
         </p>
       </Modal>
+
+      {labelFor ? <BarcodeLabelSheet products={labelFor} onClose={() => setLabelFor(null)} /> : null}
     </div>
   );
 }

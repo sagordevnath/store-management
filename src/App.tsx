@@ -11,8 +11,19 @@ import { Badge, Button, Card, Modal, ToastProvider, useDarkMode, useToast } from
 import {
   IcDashboard, IcCart, IcBox, IcSale, IcTruck, IcUsers, IcBuilding, IcWallet,
   IcChart, IcStaff, IcSettings, IcSearch, IcLogout, IcStore, IcAlert,
-  IcCategories, IcCrown, IcTools, IcRefresh,
+  IcCategories, IcCrown, IcTools, IcRefresh, IcGlobe, IcQr, IcChat, IcMegaphone, IcShield, IcTrashRestore,
 } from "./icons";
+import type { ModuleKey } from "./types";
+import { accountFor, signedInUsername, canView, canDelete } from "./lib/access";
+import { setActor } from "./lib/actor";
+import { purgeExpired } from "./lib/recycle";
+import WalletPage from "./pages/WalletPage";
+import MessagesPage from "./pages/MessagesPage";
+import StorefrontPage from "./pages/StorefrontPage";
+import AccessPage from "./pages/AccessPage";
+import RecyclePage from "./pages/RecyclePage";
+import { StorefrontPublic } from "./pages/StorefrontPublic";
+import { applyPreset, PRESETS } from "./lib/onboarding";
 import DashboardPage from "./pages/DashboardPage";
 import PosPage from "./pages/PosPage";
 import ProductsPage from "./pages/ProductsPage";
@@ -35,27 +46,33 @@ import { LoginPage } from "./pages/LoginPage";
 export type PageKey =
   | "dashboard" | "pos" | "products" | "categories" | "sales" | "purchases"
   | "customers" | "suppliers" | "expenses" | "reports" | "staff" | "settings"
-  | "billing" | "tools" | "returns";
+  | "billing" | "tools" | "returns"
+  | "storefront" | "wallet" | "messages" | "access" | "recycle";
 
-const NAV: { key: PageKey; label: string; icon: (p: { size?: number; className?: string }) => React.ReactNode; group: string }[] = [
-  { key: "dashboard", label: "nav.dashboard", icon: IcDashboard, group: "group.overview" },
-  { key: "pos", label: "nav.pos", icon: IcCart, group: "group.daily" },
-  { key: "sales", label: "nav.sales", icon: IcSale, group: "group.daily" },
-  { key: "purchases", label: "nav.purchases", icon: IcTruck, group: "group.daily" },
-  { key: "returns", label: "nav.returns", icon: IcRefresh, group: "group.daily" },
-  { key: "products", label: "nav.products", icon: IcBox, group: "group.catalog" },
-  { key: "categories", label: "nav.categories", icon: IcCategories, group: "group.catalog" },
-  { key: "customers", label: "nav.customers", icon: IcUsers, group: "group.people" },
-  { key: "suppliers", label: "nav.suppliers", icon: IcBuilding, group: "group.people" },
-  { key: "staff", label: "nav.staff", icon: IcStaff, group: "group.people" },
-  { key: "expenses", label: "nav.expenses", icon: IcWallet, group: "group.finance" },
-  { key: "reports", label: "nav.reports", icon: IcChart, group: "group.finance" },
-  { key: "tools", label: "nav.tools", icon: IcTools, group: "group.finance" },
-  { key: "billing", label: "nav.billing", icon: IcCrown, group: "group.account" },
-  { key: "settings", label: "nav.settings", icon: IcSettings, group: "group.account" },
+const NAV: { key: PageKey; label: string; icon: (p: { size?: number; className?: string }) => React.ReactNode; group: string; module: ModuleKey }[] = [
+  { key: "dashboard", label: "nav.dashboard", icon: IcDashboard, group: "group.overview", module: "dashboard" },
+  { key: "pos", label: "nav.pos", icon: IcCart, group: "group.daily", module: "pos" },
+  { key: "sales", label: "nav.sales", icon: IcSale, group: "group.daily", module: "sales" },
+  { key: "purchases", label: "nav.purchases", icon: IcTruck, group: "group.daily", module: "purchases" },
+  { key: "returns", label: "nav.returns", icon: IcRefresh, group: "group.daily", module: "returns" },
+  { key: "products", label: "nav.products", icon: IcBox, group: "group.catalog", module: "products" },
+  { key: "categories", label: "nav.categories", icon: IcCategories, group: "group.catalog", module: "categories" },
+  { key: "customers", label: "nav.customers", icon: IcUsers, group: "group.people", module: "customers" },
+  { key: "suppliers", label: "nav.suppliers", icon: IcBuilding, group: "group.people", module: "suppliers" },
+  { key: "staff", label: "nav.staff", icon: IcStaff, group: "group.people", module: "staff" },
+  { key: "storefront", label: "nav.storefront", icon: IcGlobe, group: "group.growth", module: "storefront" },
+  { key: "wallet", label: "nav.wallet", icon: IcQr, group: "group.growth", module: "wallet" },
+  { key: "messages", label: "nav.messages", icon: IcChat, group: "group.growth", module: "messages" },
+  { key: "expenses", label: "nav.expenses", icon: IcWallet, group: "group.finance", module: "expenses" },
+  { key: "reports", label: "nav.reports", icon: IcChart, group: "group.finance", module: "reports" },
+  { key: "tools", label: "nav.tools", icon: IcTools, group: "group.finance", module: "tools" },
+  { key: "access", label: "nav.access", icon: IcShield, group: "group.account", module: "access" },
+  { key: "recycle", label: "nav.recycle", icon: IcTrashRestore, group: "group.account", module: "recycle" },
+  { key: "billing", label: "nav.billing", icon: IcCrown, group: "group.account", module: "billing" },
+  { key: "settings", label: "nav.settings", icon: IcSettings, group: "group.account", module: "settings" },
 ];
 
-const NAV_GROUPS = ["group.overview", "group.daily", "group.catalog", "group.people", "group.finance", "group.account"];
+const NAV_GROUPS = ["group.overview", "group.daily", "group.catalog", "group.people", "group.growth", "group.finance", "group.account"];
 
 export interface Ctx {
   db: DB;
@@ -67,6 +84,8 @@ export interface Ctx {
   lang: Lang;
   setLang: (l: Lang) => void;
   t: TFn;
+  account: import("./types").StaffAccount | null;
+  can: (module: ModuleKey, level?: "view" | "edit" | "all") => boolean;
 }
 
 const CtxReact = React.createContext<Ctx | null>(null);
@@ -151,7 +170,20 @@ export default function App() {
 
   if (!db) return null;
 
-  const ctx: Ctx = { db, setDB: setDb, update, navigate: setPage, currency: db.settings.currency, sync, lang, setLang, t };
+  // Public storefront route — #shop/<slug>, no sign-in required.
+  const shopMatch = /^#shop\/(.+)$/.exec(window.location.hash);
+  if (shopMatch) return <StorefrontPublic db={db} slug={decodeURIComponent(shopMatch[1]!)} />;
+
+  // Signed-in staff identity (demo-grade: default to the owner account).
+  const account = accountFor(db.accounts, signedInUsername()) ?? db.accounts.find((a) => a.isOwner) ?? null;
+  const can = (module: ModuleKey, level: "view" | "edit" | "all" = "view") => {
+    if (!account) return false;
+    if (level === "view") return canView(account, module);
+    if (level === "edit") return canView(account, module);
+    return canDelete(account, module);
+  };
+
+  const ctx: Ctx = { db, setDB: setDb, update, navigate: setPage, currency: db.settings.currency, sync, lang, setLang, t, account, can };
 
   return (
     <CtxReact.Provider value={ctx}>
@@ -198,9 +230,20 @@ function Shell({
   const [dark, toggleDark] = useDarkMode();
   const [chatOpen, setChatOpen] = useState(false);
   const toast = useToast();
-  const { t } = useApp();
+  const { t, account } = useApp();
   const sub = db.subscription;
   const subState = subStateSummary(sub);
+
+  // Redirect away from pages this account can't see (e.g. after role change).
+  useEffect(() => {
+    const navItem = NAV.find((n) => n.key === page);
+    if (navItem && !canView(account, navItem.module)) onNavigate("dashboard");
+  }, [page, account]);
+
+  // Guided onboarding: offer business presets once, until dismissed or chosen.
+  const [onboardingOpen, setOnboardingOpen] = useState(() => {
+    try { return localStorage.getItem("Managix_onboarding_dismissed") !== "1"; } catch { return false; }
+  });
 
   const lowStock = db.products.filter((p) => p.stock <= p.lowStockAt);
 
@@ -240,11 +283,14 @@ function Shell({
           </div>
         </div>
         <nav className="flex-1 space-y-6 overflow-y-auto px-3 py-4">
-          {NAV_GROUPS.map((group) => (
+          {NAV_GROUPS.map((group) => {
+            const items = NAV.filter((n) => n.group === group && canView(account, n.module));
+            if (items.length === 0) return null;
+            return (
             <div key={group}>
               <p className="mb-1.5 px-2.5 text-[10px] font-bold uppercase tracking-widest text-white/35">{t(group)}</p>
               <div className="space-y-0.5">
-                {NAV.filter((n) => n.group === group).map((n) => (
+                {items.map((n) => (
                   <button
                     key={n.key}
                     onClick={() => { onNavigate(n.key); setSidebarOpen(false); }}
@@ -266,11 +312,17 @@ function Shell({
                         {planName(sub)}
                       </span>
                     ) : null}
+                    {n.key === "recycle" && db.trash.length > 0 ? (
+                      <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-white/15 px-1.5 text-[10px] font-bold text-white/80">
+                        {db.trash.length}
+                      </span>
+                    ) : null}
                   </button>
                 ))}
               </div>
             </div>
-          ))}
+            );
+          })}
         </nav>
         <div className="border-t border-white/10 p-3">
           <div className="rounded-xl border border-white/10 bg-white/[0.06] p-1.5 shadow-lg shadow-black/20 backdrop-blur">
@@ -400,6 +452,11 @@ function Shell({
             {page === "reports" && <ReportsPage />}
             {page === "staff" && <StaffPage />}
             {page === "tools" && <ToolsPage />}
+            {page === "storefront" && <StorefrontPage />}
+            {page === "wallet" && <WalletPage />}
+            {page === "messages" && <MessagesPage />}
+            {page === "access" && <AccessPage />}
+            {page === "recycle" && <RecyclePage />}
             {page === "billing" && <BillingPage />}
             {page === "settings" && (
               <SettingsPage
@@ -415,7 +472,52 @@ function Shell({
       </div>
 
       {hasFeature(sub, "support_chat") ? <SupportChat open={chatOpen} onOpenChange={setChatOpen} /> : null}
+
+      {onboardingOpen ? (
+        <OnboardingModal
+          onClose={() => setOnboardingOpen(false)}
+          onPick={(key) => {
+            update((d) => applyPreset(d, key, d.settings.ownerName));
+            try { localStorage.setItem("Managix_onboarding_dismissed", "1"); } catch { /* ignore */ }
+            setOnboardingOpen(false);
+            toast("Catalog ready — products and categories added", "success");
+          }}
+        />
+      ) : null}
     </div>
+  );
+}
+
+/* ---------------- Guided onboarding — business-type presets ---------------- */
+
+function OnboardingModal({ onClose, onPick }: { onClose: () => void; onPick: (key: Exclude<import("./types").BusinessPreset, null>) => void }) {
+  const dismiss = () => {
+    try { localStorage.setItem("Managix_onboarding_dismissed", "1"); } catch { /* ignore */ }
+    onClose();
+  };
+  return (
+    <Modal open onClose={onClose} title="Set up your shop" wide>
+      <p className="text-sm text-ink-500">
+        Pick what you sell and Managix pre-fills categories, units and starter products. You can change everything later.
+      </p>
+      <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        {PRESETS.map((p) => (
+          <button
+            key={p.key}
+            onClick={() => onPick(p.key)}
+            className="rounded-2xl border border-ink-200 p-4 text-left transition-all hover:border-brand-400 hover:shadow-pop"
+          >
+            <span className="text-2xl">{p.emoji}</span>
+            <p className="mt-1.5 text-sm font-bold text-ink-900">{p.label}</p>
+            <p className="mt-0.5 text-xs leading-relaxed text-ink-500">{p.blurb}</p>
+            <p className="mt-2 text-[11px] font-semibold text-brand-700">{p.categories.length} categories · {p.products.length} starter products</p>
+          </button>
+        ))}
+      </div>
+      <div className="mt-4 flex justify-end">
+        <Button variant="ghost" onClick={dismiss}>Skip — I'll set up myself</Button>
+      </div>
+    </Modal>
   );
 }
 

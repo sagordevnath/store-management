@@ -16,7 +16,9 @@ import {
   type PeriodKey,
 } from "../lib/period";
 import { AreaChart, BarChartH, Badge, Button, Card, CardHeader, LockedCard, Segmented, Th, Td } from "../ui";
-import { IcDownload } from "../icons";
+import { IcDownload, IcPrint } from "../icons";
+import { printIsolated } from "../lib/print";
+import { ReportSheet } from "./ReportSheet";
 
 type Tab = "pl" | "category" | "expenses";
 
@@ -24,6 +26,7 @@ export default function ReportsPage() {
   const { db, currency, navigate, t } = useApp();
   const [period, setPeriod] = useState<PeriodKey>("monthly");
   const [tab, setTab] = useState<Tab>("pl");
+  const [printOpen, setPrintOpen] = useState(false);
   const canCategory = hasFeature(db.subscription, "categories_report");
 
   const m = useMemo(() => periodMetrics(db, period), [db, period]);
@@ -72,6 +75,10 @@ export default function ReportsPage() {
     ]);
   };
 
+  const exportPdf = () => {
+    setPrintOpen(true);
+  };
+
   const DeltaBadge = ({ delta, invert = false }: { delta: number | null; invert?: boolean }) => {
     if (delta === null) return <Badge tone="neutral">No comparison</Badge>;
     const up = delta >= 0;
@@ -93,11 +100,16 @@ export default function ReportsPage() {
             {m.rangeText} · sales, profit, categories and expenses for {periodName(period)}
           </p>
         </div>
-        <Segmented
-          options={PERIODS.map((p) => ({ value: p.value, label: t(p.labelKey) }))}
-          value={period}
-          onChange={(v) => setPeriod(v as PeriodKey)}
-        />
+        <div className="flex items-center gap-2">
+          <Button variant="secondary" size="sm" onClick={exportPdf}>
+            <IcPrint size={13} /> PDF
+          </Button>
+          <Segmented
+            options={PERIODS.map((p) => ({ value: p.value, label: t(p.labelKey) }))}
+            value={period}
+            onChange={(v) => setPeriod(v as PeriodKey)}
+          />
+        </div>
       </div>
 
       <Segmented
@@ -402,6 +414,8 @@ export default function ReportsPage() {
           </Card>
         </>
       ) : null}
+
+      {printOpen ? <ReportSheet onClose={() => setPrintOpen(false)} /> : null}
     </div>
   );
 }

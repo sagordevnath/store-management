@@ -261,6 +261,150 @@ export interface Settings {
   invoiceNote?: string; // footer note (terms, thank-you, return policy)
 }
 
+/* ---------------- Phase 6: roles & permissions ---------------- */
+
+export type ModuleKey =
+  | "dashboard" | "pos" | "sales" | "purchases" | "returns" | "products"
+  | "categories" | "customers" | "suppliers" | "staff" | "expenses"
+  | "reports" | "tools" | "storefront" | "wallet" | "messages" | "recycle"
+  | "audit" | "access" | "billing" | "settings";
+
+/** Per-module capability. "none" hides the module entirely. */
+export type Perm = "none" | "view" | "edit" | "all";
+
+export type PresetRole = "owner" | "manager" | "cashier" | "accountant" | "custom";
+
+export interface StaffAccount {
+  staffId: ID;               // links to StaffMember
+  username: string;
+  pin: string;               // demo-grade PIN auth
+  role: PresetRole;
+  perms: Partial<Record<ModuleKey, Perm>>; // only meaningful when role === "custom"
+  active: boolean;
+  isOwner?: boolean;         // the protected primary account — cannot be edited/removed
+  createdAt: string;
+}
+
+export interface AuditEntry {
+  id: ID;
+  at: string;
+  actor: string;             // display name ("Owner" default)
+  action: "create" | "update" | "delete" | "restore" | "login" | "sale" | "payment" | "purge";
+  entity: string;            // "Sale", "Product", "Customer"…
+  ref: string;               // invoice no / sku / name
+  detail: string;            // human-readable one-liner
+  branchId?: ID | null;
+}
+
+/* ---------------- Phase 6: recycle bin ---------------- */
+
+export interface TrashItem {
+  id: ID;
+  deletedAt: string;
+  deletedBy: string;
+  kind: "product" | "customer" | "supplier" | "expense" | "sale";
+  label: string;             // name / invoice no for display
+  sub: string;               // sku / phone / category for display
+  payload: Product | Customer | Supplier | Expense | Sale; // original record
+}
+
+/* ---------------- Phase 6: wallet (mobile-banking style) ---------------- */
+
+export type WalletChannel = "bKash" | "Nagad" | "Rocket" | "Bank";
+
+export interface WalletTx {
+  id: ID;
+  at: string;
+  channel: WalletChannel;
+  kind: "in" | "out";        // money in / money out of the wallet
+  amount: number;
+  fee: number;               // cash-out / send-money fee
+  ref: string;               // TrxID
+  note: string;
+  linkedSaleId?: ID | null;  // when a sale was settled through the wallet
+}
+
+export interface WalletAccount {
+  channel: WalletChannel;
+  number: string;
+}
+
+/* ---------------- Phase 6: communication ---------------- */
+
+export interface ChatMsg {
+  id: ID;
+  at: string;
+  from: "me" | "them";
+  text: string;
+  kind: "chat" | "sms" | "system";
+}
+
+export interface Thread {
+  id: ID;
+  party: "customer" | "supplier";
+  partyId: ID;
+  messages: ChatMsg[];
+  unread: number;
+  updatedAt: string;
+}
+
+export interface ReminderLog {
+  id: ID;
+  at: string;
+  customerId: ID;
+  customerName: string;
+  amount: number;
+  method: "sms" | "call" | "whatsapp";
+  note: string;
+}
+
+/* ---------------- Phase 6: marketing ---------------- */
+
+export interface Campaign {
+  id: ID;
+  at: string;
+  title: string;
+  body: string;
+  audience: "all" | "due" | "loyal" | "inactive";
+  count: number;
+  channel: "sms" | "announcement";
+}
+
+/* ---------------- Phase 6: online storefront ---------------- */
+
+export interface StorefrontTheme {
+  accent: string;            // hex
+  hero: string;              // tagline line
+  banner?: string | null;    // dataURL
+  font: "modern" | "friendly" | "classic";
+}
+
+export interface StorefrontOrder {
+  id: ID;
+  at: string;
+  customerName: string;
+  phone: string;
+  address: string;
+  items: { productId: ID; name: string; price: number; qty: number }[];
+  total: number;
+  status: "New" | "Accepted" | "Delivered" | "Rejected";
+  note: string;
+}
+
+export interface StorefrontSettings {
+  enabled: boolean;
+  slug: string;              // public link: #shop/<slug>
+  customDomain: string;
+  theme: StorefrontTheme;
+  visibleCategoryIds: ID[] | null; // null = all
+  minOrder: number;
+  deliveryFee: number;
+}
+
+/* ---------------- Phase 8: onboarding ---------------- */
+
+export type BusinessPreset = "grocery" | "pharmacy" | "electronics" | "fashion" | "wholesale" | null;
+
 export interface DB {
   products: Product[];
   categories: Category[];
@@ -277,4 +421,16 @@ export interface DB {
   saleReturns: SaleReturn[];
   purchaseReturns: PurchaseReturn[];
   branches: Branch[];
+  /* --- Phase 6 --- */
+  accounts: StaffAccount[];
+  audit: AuditEntry[];
+  trash: TrashItem[];
+  wallet: WalletTx[];
+  walletAccounts: WalletAccount[];
+  threads: Thread[];
+  reminders: ReminderLog[];
+  campaigns: Campaign[];
+  storefront: StorefrontSettings;
+  storefrontOrders: StorefrontOrder[];
+  onboarding: BusinessPreset;
 }

@@ -13,6 +13,7 @@ import type {
 } from "../types";
 import { uid, daysAgoISO, round2 } from "./helpers";
 import { TRIAL_DAYS } from "./plans";
+import { defaultAccounts, defaultStorefront } from "./defaults";
 
 /** [name, leaf category id (null = intentionally uncategorized demo), price, cost, unit, lowStockAt] */
 const PRODUCTS_RAW: [string, string | null, number, number, string, number][] = [
@@ -330,6 +331,96 @@ export function buildSeedDB(): DB {
     saleReturns: [],
     purchaseReturns: [],
     branches,
+    accounts: defaultAccounts({ staff: [{ id: "st-owner", name: "Omar Farouk" }] }),
+    audit: [
+      {
+        id: uid("aud"),
+        at: daysAgoISO(0, 9),
+        actor: "Owner",
+        action: "login",
+        entity: "Session",
+        ref: "owner",
+        detail: "Signed in at shop terminal",
+      },
+    ],
+    trash: [],
+    wallet: [
+      { id: uid("wtx"), at: daysAgoISO(0, 10), channel: "bKash", kind: "in", amount: 1250, fee: 0, ref: "BKX8QW2M", note: "Customer payment — INV-1042", linkedSaleId: null },
+      { id: uid("wtx"), at: daysAgoISO(1, 15), channel: "Nagad", kind: "in", amount: 2100, fee: 0, ref: "NGP41KKL", note: "Customer payment — INV-1039", linkedSaleId: null },
+      { id: uid("wtx"), at: daysAgoISO(2, 12), channel: "bKash", kind: "out", amount: 6000, fee: 111, ref: "BKZ77HAD", note: "Supplier payment — Fresh Distributors", linkedSaleId: null },
+      { id: uid("wtx"), at: daysAgoISO(4, 9), channel: "Bank", kind: "out", amount: 18000, fee: 0, ref: "BNK-TR-88410", note: "Shop rent transfer", linkedSaleId: null },
+    ],
+    walletAccounts: [
+      { channel: "bKash", number: "01712-345678" },
+      { channel: "Nagad", number: "01812-345678" },
+      { channel: "Bank", number: "BRAC 1501-2030-4567" },
+    ],
+    threads: [
+      {
+        id: uid("thr"),
+        party: "customer",
+        partyId: "c-1",
+        messages: [
+          { id: uid("cm"), at: daysAgoISO(1, 11), from: "me", text: "Assalamu alaikum! Your order INV-1035 is ready for pickup.", kind: "chat" },
+          { id: uid("cm"), at: daysAgoISO(1, 12), from: "them", text: "Thanks! I'll come by this evening inshaAllah.", kind: "chat" },
+        ],
+        unread: 0,
+        updatedAt: daysAgoISO(1, 12),
+      },
+    ],
+    reminders: [],
+    campaigns: [
+      {
+        id: uid("cmp"),
+        at: daysAgoISO(3, 17),
+        title: "Eid discount week",
+        body: "Get 10% off on all groceries this week at Bright Leaf Market!",
+        audience: "all",
+        count: 28,
+        channel: "sms",
+      },
+    ],
+    storefront: {
+      ...defaultStorefront(),
+      enabled: true,
+      slug: "bright-leaf",
+      theme: {
+        accent: "#1f6a4c",
+        hero: "Fresh groceries from Bright Leaf — same-day delivery in Dhaka.",
+        banner: null,
+        font: "modern",
+      },
+      minOrder: 300,
+      deliveryFee: 40,
+    },
+    storefrontOrders: [
+      {
+        id: uid("sfo"),
+        at: daysAgoISO(0, 9),
+        customerName: "Nusrat Jahan",
+        phone: "01911223344",
+        address: "House 12, Road 5, Dhanmondi",
+        items: [
+          { productId: "p-1", name: "Basmati Rice 5kg", price: 18.5, qty: 2 },
+          { productId: "p-6", name: "Whole Milk 1L", price: 1.6, qty: 4 },
+        ],
+        total: round2(18.5 * 2 + 1.6 * 4 + 40),
+        status: "New",
+        note: "Please call before delivery",
+      },
+      {
+        id: uid("sfo"),
+        at: daysAgoISO(1, 16),
+        customerName: "Rakib Hasan",
+        phone: "01633445566",
+        address: "Flat B4, Lalmatia",
+        items: [{ productId: "p-15", name: "Salted Peanuts 200g", price: 2.4, qty: 3 }],
+        total: round2(2.4 * 3 + 40),
+        status: "Delivered",
+        note: "",
+      },
+    ],
+    onboarding: null,
     settings: {
       shopName: "Bright Leaf Market",
       tagline: "Grocery & Household",

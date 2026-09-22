@@ -210,3 +210,39 @@ html[lang="ar"] body {
     border: none !important;
   }
 }
+
+/* ---------- print: barcode label sheet + report sheet ---------- */
+@media print {
+  body.labels-printing > *:not(#label-sheet-print),
+  body.report-printing > *:not(#report-sheet-print) {
+    display: none !important;
+  }
+  body.labels-printing,
+  body.report-printing {
+    margin: 0 !important;
+    background: #fff !important;
+  }
+  @page {
+    size: A4 portrait;
+    margin: 0;
+  }
+  #label-sheet-print,
+  #report-sheet-print {
+    display: block !important;
+    position: static !important;
+    width: 210mm !important;
+    min-height: 296.6mm !important;
+    margin: 0 auto !important;
+    box-shadow: none !important;
+    border-radius: 0 !important;
+    background: #fff !important;
+    padding: 10mm !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+  #label-sheet-print *,
+  #report-sheet-print * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+}

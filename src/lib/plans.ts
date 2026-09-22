@@ -25,7 +25,15 @@ export type FeatureKey =
   | "expiry_tracking"
   | "branches"
   | "loyalty"
-  | "credit_sales";
+  | "credit_sales"
+  /* --- Phase 6: growth suite --- */
+  | "storefront"
+  | "wallet_qr"
+  | "messages_hub"
+  | "marketing_campaigns"
+  | "team_access"
+  | "recycle_bin"
+  | "barcode_tools";
 
 export interface PlanLimits {
   products: number; // Infinity = unlimited
@@ -52,7 +60,7 @@ export const PLANS: Record<Exclude<PlanTier, "trial">, PlanDef> = {
     monthly: 12,
     yearly: 120,
     accent: "from-sky-500 to-sky-600",
-    features: ["categories_nested", "target_progress", "compare_period", "voice_entry", "returns", "expiry_tracking", "loyalty", "credit_sales"],
+    features: ["categories_nested", "target_progress", "compare_period", "voice_entry", "returns", "expiry_tracking", "loyalty", "credit_sales", "wallet_qr", "barcode_tools", "recycle_bin"],
     limits: { products: 300, staff: 2, branches: 1 },
   },
   pro: {
@@ -70,6 +78,13 @@ export const PLANS: Record<Exclude<PlanTier, "trial">, PlanDef> = {
       "expiry_tracking",
       "loyalty",
       "credit_sales",
+      "wallet_qr",
+      "barcode_tools",
+      "recycle_bin",
+      "storefront",
+      "messages_hub",
+      "marketing_campaigns",
+      "team_access",
       "categories_nested",
       "categories_report",
       "bulk_recategorize",
@@ -115,6 +130,13 @@ export const PLANS: Record<Exclude<PlanTier, "trial">, PlanDef> = {
       "branches",
       "loyalty",
       "credit_sales",
+      "storefront",
+      "wallet_qr",
+      "messages_hub",
+      "marketing_campaigns",
+      "team_access",
+      "recycle_bin",
+      "barcode_tools",
     ],
     limits: { products: Infinity, staff: Infinity, branches: Infinity },
   },

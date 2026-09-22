@@ -1,7 +1,9 @@
 import { useMemo, useState } from "react";
 import { useApp } from "../App";
 import type { Customer, PriceTier } from "../types";
-import { upsertCustomer, deleteCustomer, customerDue, customerDueList, collectDue } from "../lib/store";
+import { upsertCustomer, customerDue, customerDueList, collectDue } from "../lib/store";
+import { softDelete } from "../lib/recycle";
+import { logAudit } from "../lib/audit";
 import { fmtMoney, fmtDate, initials, uid, downloadCSV } from "../lib/helpers";
 import { Badge, Button, Card, Field, Modal, NumberInput, Select, TextInput, useToast, Th, Td, EmptyState } from "../ui";
 import { IcPlus, IcSearch, IcEdit, IcTrash, IcDownload, IcCash, IcUsers } from "../icons";
@@ -215,7 +217,7 @@ export default function CustomersPage() {
         footer={
           <div className="flex justify-end gap-2">
             <Button variant="secondary" onClick={() => setConfirmDelete(null)}>Cancel</Button>
-            <Button variant="danger" onClick={() => { update((d) => deleteCustomer(d, confirmDelete!.id)); toast("Customer deleted", "info"); setConfirmDelete(null); }}>Delete</Button>
+            <Button variant="danger" onClick={() => { const name = confirmDelete!.name; update((d) => { const next = softDelete(d, "customer", confirmDelete!.id, d.settings.ownerName); return { ...next, audit: logAudit(next.audit, "delete", "Customer", name, "Moved to recycle bin") }; }); toast("Moved to recycle bin — restore within 30 days", "info"); setConfirmDelete(null); }}>Delete</Button>
           </div>
         }
       >

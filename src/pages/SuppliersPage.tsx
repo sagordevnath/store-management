@@ -1,7 +1,9 @@
 import { useMemo, useState } from "react";
 import { useApp } from "../App";
 import type { Supplier } from "../types";
-import { upsertSupplier, deleteSupplier, supplierDue, paySupplier } from "../lib/store";
+import { upsertSupplier, supplierDue, paySupplier } from "../lib/store";
+import { softDelete } from "../lib/recycle";
+import { logAudit } from "../lib/audit";
 import { fmtMoney, initials, uid, downloadCSV } from "../lib/helpers";
 import { Badge, Button, Card, Field, Modal, NumberInput, TextInput, useToast, Th, Td, EmptyState } from "../ui";
 import { IcPlus, IcSearch, IcEdit, IcTrash, IcDownload, IcCash, IcBuilding } from "../icons";
@@ -187,7 +189,7 @@ export default function SuppliersPage() {
         footer={
           <div className="flex justify-end gap-2">
             <Button variant="secondary" onClick={() => setConfirmDelete(null)}>Cancel</Button>
-            <Button variant="danger" onClick={() => { update((d) => deleteSupplier(d, confirmDelete!.id)); toast("Supplier deleted", "info"); setConfirmDelete(null); }}>Delete</Button>
+            <Button variant="danger" onClick={() => { const name = confirmDelete!.name; update((d) => { const next = softDelete(d, "supplier", confirmDelete!.id, d.settings.ownerName); return { ...next, audit: logAudit(next.audit, "delete", "Supplier", name, "Moved to recycle bin") }; }); toast("Moved to recycle bin — restore within 30 days", "info"); setConfirmDelete(null); }}>Delete</Button>
           </div>
         }
       >

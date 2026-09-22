@@ -20,6 +20,7 @@ import { activeLocale, localizeDigits } from "./i18n";
 import { buildSeedDB } from "./seed";
 import { subtreeIds } from "./categories";
 import { customerLocation, initDelivery, stepDelivery } from "./delivery";
+import { defaultAccounts, defaultStorefront, demoWallet } from "./defaults";
 
 const KEY = "Managix_db_v1";
 
@@ -61,6 +62,12 @@ export function migrateDB(db: DB): DB {
   const needsSettings =
     !db.settings || typeof (db.settings as { monthlyTarget?: number }).monthlyTarget !== "number";
   const hasLegacyCategory = db.products.some((p) => (p as unknown as { category?: string }).category);
+  const needsPhase6 =
+    !Array.isArray((db as Partial<DB>).accounts) ||
+    !Array.isArray((db as Partial<DB>).trash) ||
+    !Array.isArray((db as Partial<DB>).wallet) ||
+    !Array.isArray((db as Partial<DB>).storefrontOrders) ||
+    !(db as Partial<DB>).storefront;
   const needsProductFields = db.products.some(
     (p) =>
       (p as Partial<Product>).forRetailSale === undefined ||
@@ -82,7 +89,8 @@ export function migrateDB(db: DB): DB {
     !needsSettings &&
     !hasLegacyCategory &&
     !needsProductFields &&
-    !needsPhase4
+    !needsPhase4 &&
+    !needsPhase6
   )
     return db;
 
@@ -119,6 +127,17 @@ export function migrateDB(db: DB): DB {
     branches: Array.isArray((db as Partial<DB>).branches) ? (db as Partial<DB>).branches! : [
       { id: "br-main", name: "Main Branch", address: "", createdAt: new Date().toISOString() },
     ],
+    accounts: Array.isArray((db as Partial<DB>).accounts) ? (db as Partial<DB>).accounts! : defaultAccounts(db),
+    audit: Array.isArray((db as Partial<DB>).audit) ? (db as Partial<DB>).audit! : [],
+    trash: Array.isArray((db as Partial<DB>).trash) ? (db as Partial<DB>).trash! : [],
+    wallet: Array.isArray((db as Partial<DB>).wallet) ? (db as Partial<DB>).wallet! : demoWallet().wallet,
+    walletAccounts: Array.isArray((db as Partial<DB>).walletAccounts) ? (db as Partial<DB>).walletAccounts! : demoWallet().walletAccounts,
+    threads: Array.isArray((db as Partial<DB>).threads) ? (db as Partial<DB>).threads! : [],
+    reminders: Array.isArray((db as Partial<DB>).reminders) ? (db as Partial<DB>).reminders! : [],
+    campaigns: Array.isArray((db as Partial<DB>).campaigns) ? (db as Partial<DB>).campaigns! : [],
+    storefront: (db as Partial<DB>).storefront ?? defaultStorefront(),
+    storefrontOrders: Array.isArray((db as Partial<DB>).storefrontOrders) ? (db as Partial<DB>).storefrontOrders! : [],
+    onboarding: ((db as Partial<DB>).onboarding ?? null) as DB["onboarding"],
     categories: needsCategories || db.categories.length === 0 ? seed.categories : db.categories,
     subscription: needsSubscription ? seed.subscription : db.subscription,
     subInvoices: Array.isArray(db.subInvoices) ? db.subInvoices : [],
