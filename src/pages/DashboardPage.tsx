@@ -28,7 +28,7 @@ import {
 type StatKey = "sales" | "purchases" | "expenses" | "stock" | "payable" | "receivable";
 
 export default function DashboardPage() {
-  const { db, setDB, currency, navigate, sync, t } = useApp();
+  const { db, currency, navigate, sync, t } = useApp();
   const [period, setPeriod] = useState<PeriodKey>("today");
   const [refreshTick, setRefreshTick] = useState(0);
   const [openStat, setOpenStat] = useState<StatKey | null>(null);
@@ -60,10 +60,10 @@ export default function DashboardPage() {
   );
 
   const onRefresh = () => {
-    try {
-      const raw = localStorage.getItem("Managix_db_v2");
-      if (raw) setDB(JSON.parse(raw));
-    } catch { /* ignore */ }
+    // Re-sync with the server (if reachable) and recompute derived memos.
+    // NOTE: previously this read a `Managix_db_v2` key that nothing ever writes —
+    // the live document lives under the workspace-scoped `Managix_db_v1_*` key and
+    // is already in React state, so a refresh is just a sync + re-render tick.
     void syncEngine.syncNow().catch(() => undefined);
     setRefreshTick((t) => t + 1);
   };
@@ -133,8 +133,20 @@ export default function DashboardPage() {
     [db, refreshTick]
   );
 
+  const receivablesTotal = useMemo(
+    () => db.customers.reduce((sum, c) => sum + customerDue(db, c.id, c.openingDue), 0),
+    [db, refreshTick]
+  );
+
+  const payablesTotal = useMemo(
+    () => db.suppliers.reduce((sum, s) => sum + supplierDue(db, s.id), 0),
+    [db, refreshTick]
+  );
+
+  const netCashHealth = kpis.cashOnHand + receivablesTotal - payablesTotal;
+
   const cards: {
-    key: StatKey; label: string; value: number; icon: React.ReactNode; valueCls: string; iconCls: string; raw?: boolean;
+    key: StatKey; label: string; value: number; icon: React.ReactNode; valueCls: string; iconCls: string; raw?: boolean; panelClass?: string;
   }[] = [
     {
       key: "sales", label: `${t(periodLabelKey(period))} ${t("dash.sales")}`, value: m.salesTotal,
@@ -154,27 +166,30 @@ export default function DashboardPage() {
     },
     {
       key: "payable", label: t("dash.payable"), value: m.payableTotal,
-      icon: <IcWallet size={17} />, valueCls: "text-red-600", iconCls: "text-red-600",
+      icon: <IcWallet size={17} />, valueCls: "text-red-600", iconCls: "text-red-600", panelClass: "border-red-200 bg-gradient-to-br from-red-50 via-white to-rose-100/90 shadow-[0_16px_40px_-22px_rgba(244,63,94,0.55)]",
     },
     {
       key: "receivable", label: t("dash.receivable"), value: m.receivableTotal,
-      icon: <IcCash size={17} />, valueCls: "text-teal-600", iconCls: "text-teal-600",
+      icon: <IcCash size={17} />, valueCls: "text-teal-600", iconCls: "text-teal-600", panelClass: "border-emerald-200 bg-gradient-to-br from-emerald-50 via-white to-cyan-100/90 shadow-[0_16px_40px_-22px_rgba(16,185,129,0.55)]",
     },
   ];
 
   return (
     <div className="space-y-5">
       {/* Greeting */}
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-bold text-ink-900">
-            Good {new Date().getHours() < 12 ? "morning" : new Date().getHours() < 18 ? "afternoon" : "evening"}, {db.settings.ownerName.split(" ")[0]}
-          </h1>
-          <p className="mt-0.5 text-sm text-ink-500">Here is how {db.settings.shopName} is performing.</p>
-        </div>
-        <div className="flex gap-2">
-          <Button variant="secondary" onClick={() => navigate("reports")}><IcDownload size={15} /> Reports</Button>
-          <Button onClick={() => navigate("pos")}><IcPlus size={15} /> New Sale</Button>
+      <div className="rounded-3xl border border-slate-800/60 bg-gradient-to-r from-slate-950 via-slate-900 to-emerald-950 p-4 text-white shadow-[0_25px_60px_-28px_rgba(16,185,129,0.7)]">
+        <div className="flex flex-wrap items-end justify-between gap-4">
+          <div>
+            <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-emerald-300">Store intelligence</p>
+            <h1 className="mt-1 text-xl font-bold text-white">
+              Good {new Date().getHours() < 12 ? "morning" : new Date().getHours() < 18 ? "afternoon" : "evening"}, {db.settings.ownerName.split(" ")[0]}
+            </h1>
+            <p className="mt-1 text-sm text-slate-300">Here is how {db.settings.shopName} is performing.</p>
+          </div>
+          <div className="flex gap-2">
+            <Button variant="secondary" onClick={() => navigate("reports")} className="border-white/20 bg-white/10 text-white hover:bg-white/15 hover:text-white"> <IcDownload size={15} /> Reports </Button>
+            <Button onClick={() => navigate("pos")} className="bg-emerald-500 text-white hover:bg-emerald-400"> <IcPlus size={15} /> New Sale </Button>
+          </div>
         </div>
       </div>
 
@@ -216,15 +231,18 @@ export default function DashboardPage() {
       <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 lg:grid-cols-3">
         {cards.map((c) => (
           <button key={c.key} onClick={() => setOpenStat(c.key)} className="group text-left focus:outline-none">
-            <Card className="h-full p-4 transition-all group-hover:border-brand-300 group-hover:shadow-pop group-focus-visible:ring-2 group-focus-visible:ring-brand-500/50">
+            <Card className={classNames(
+              "h-full p-4 transition-all duration-200 group-hover:-translate-y-0.5 group-hover:border-brand-300 group-hover:shadow-pop group-focus-visible:ring-2 group-focus-visible:ring-brand-500/50",
+              c.panelClass ?? "border-ink-200 bg-white"
+            )}>
               <div className="flex items-start justify-between gap-3">
                 <p className="text-sm font-medium text-ink-700">{c.label}</p>
-                <span className={c.iconCls}>{c.icon}</span>
+                <span className={classNames("rounded-lg bg-white/80 p-1.5 shadow-sm ring-1 ring-ink-100", c.iconCls)}>{c.icon}</span>
               </div>
               <p className={classNames("mt-2 text-2xl font-bold tracking-tight", c.valueCls)}>
                 {c.raw ? localizeDigits(String(c.value)) : fmtMoney(c.value, currency)}
               </p>
-              <p className="mt-1 text-[11px] text-ink-400">
+              <p className="mt-1 text-[11px] text-ink-500">
                 {c.key === "stock"
                   ? t("dash.cardStock", { products: localizeDigits(String(m.productCount)), low: localizeDigits(String(m.lowStock)) })
                   : c.key === "sales"
@@ -243,6 +261,58 @@ export default function DashboardPage() {
             </Card>
           </button>
         ))}
+      </div>
+
+      <div className="grid gap-3.5 lg:grid-cols-[1.3fr_0.7fr]">
+        <Card className="border-emerald-200 bg-gradient-to-br from-emerald-50 via-white to-cyan-50/80">
+          <div className="flex items-center justify-between gap-3 border-b border-emerald-100 px-5 py-4">
+            <div>
+              <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-emerald-600">Finance pulse</p>
+              <h3 className="mt-1 text-base font-semibold text-ink-900">Cash health snapshot</h3>
+            </div>
+            <Badge tone={netCashHealth >= 0 ? "green" : "amber"}>{netCashHealth >= 0 ? "Healthy" : "Watchlist"}</Badge>
+          </div>
+          <div className="grid gap-3 p-4 md:grid-cols-4">
+            <div className="rounded-2xl border border-emerald-100 bg-white/80 p-3">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-emerald-600">Cash</p>
+              <p className="mt-2 text-lg font-bold text-emerald-700">{fmtMoney(kpis.cashOnHand, currency)}</p>
+            </div>
+            <div className="rounded-2xl border border-red-100 bg-white/80 p-3">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-red-600">Receivables</p>
+              <p className="mt-2 text-lg font-bold text-red-600">{fmtMoney(receivablesTotal, currency)}</p>
+            </div>
+            <div className="rounded-2xl border border-amber-100 bg-white/80 p-3">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-amber-600">Payables</p>
+              <p className="mt-2 text-lg font-bold text-amber-600">{fmtMoney(payablesTotal, currency)}</p>
+            </div>
+            <div className="rounded-2xl border border-violet-100 bg-white/80 p-3">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-violet-600">Net position</p>
+              <p className="mt-2 text-lg font-bold text-violet-700">{fmtMoney(netCashHealth, currency)}</p>
+            </div>
+          </div>
+        </Card>
+
+        <Card>
+          <div className="border-b border-ink-100 px-5 py-4">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-ink-500">Due focus</p>
+            <h3 className="mt-1 text-base font-semibold text-ink-900">Top accounts</h3>
+          </div>
+          <div className="divide-y divide-ink-100">
+            {dues.length === 0 ? (
+              <p className="px-5 py-6 text-center text-sm text-ink-400">No due balances today.</p>
+            ) : (
+              dues.map(({ c, due }) => (
+                <div key={c.id} className="flex items-center justify-between gap-3 px-5 py-2.5">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium text-ink-800">{c.name}</p>
+                    <p className="text-[11px] text-ink-400">{c.phone || "No phone"}</p>
+                  </div>
+                  <span className="text-sm font-bold text-red-600">{fmtMoney(due, currency)}</span>
+                </div>
+              ))
+            )}
+          </div>
+        </Card>
       </div>
 
       {/* Quick actions */}
@@ -771,11 +841,29 @@ function StatModal({
       sub: "Outstanding supplier balance right now",
       body: (
         <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-            <Mini label="Total payable" value={fmtMoney(m.payableTotal, currency)} strong tone="text-red-600" />
-            <Mini label={t("dash.suppliersOwed")} value={localizeDigits(String(m.payableSuppliers))} />
-            <Mini label={`${t("dash.newPayable")} ${t(periodNameKey(period))}`} value={fmtMoney(m.payableIncurred, currency)} />
+          <div className="rounded-2xl border border-red-100 bg-gradient-to-br from-red-50 via-white to-rose-100/90 p-4 shadow-[0_20px_40px_-28px_rgba(239,68,68,0.7)]">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-red-500">Cash outflow</p>
+                <h3 className="mt-1 text-lg font-bold text-ink-900">Supplier liabilities</h3>
+              </div>
+              <div className="rounded-xl bg-white/80 p-2 text-red-600 shadow-sm ring-1 ring-red-100">
+                <IcWallet size={18} />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+              <div className="rounded-xl border border-white/80 bg-white/80 p-3 shadow-sm">
+                <Mini label="Total payable" value={fmtMoney(m.payableTotal, currency)} strong tone="text-red-600" />
+              </div>
+              <div className="rounded-xl border border-white/80 bg-white/80 p-3 shadow-sm">
+                <Mini label={t("dash.suppliersOwed")} value={localizeDigits(String(m.payableSuppliers))} />
+              </div>
+              <div className="rounded-xl border border-white/80 bg-white/80 p-3 shadow-sm">
+                <Mini label={`${t("dash.newPayable")} ${t(periodNameKey(period))}`} value={fmtMoney(m.payableIncurred, currency)} />
+              </div>
+            </div>
           </div>
+
           <TopList
             rows={db.suppliers
               .map((s) => ({ s, due: supplierDue(db, s.id) }))
@@ -794,11 +882,29 @@ function StatModal({
       sub: "Outstanding customer balance right now",
       body: (
         <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-            <Mini label="Total receivable" value={fmtMoney(m.receivableTotal, currency)} strong tone="text-teal-600" />
-            <Mini label={t("dash.customersOwing")} value={localizeDigits(String(m.dueCustomers))} />
-            <Mini label={`${t("dash.newReceivable")} ${t(periodNameKey(period))}`} value={fmtMoney(m.receivableIncurred, currency)} />
+          <div className="rounded-2xl border border-emerald-100 bg-gradient-to-br from-emerald-50 via-white to-cyan-100/90 p-4 shadow-[0_20px_40px_-28px_rgba(16,185,129,0.7)]">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-500">Cash inflow</p>
+                <h3 className="mt-1 text-lg font-bold text-ink-900">Customer receivables</h3>
+              </div>
+              <div className="rounded-xl bg-white/80 p-2 text-emerald-600 shadow-sm ring-1 ring-emerald-100">
+                <IcCash size={18} />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+              <div className="rounded-xl border border-white/80 bg-white/80 p-3 shadow-sm">
+                <Mini label="Total receivable" value={fmtMoney(m.receivableTotal, currency)} strong tone="text-teal-600" />
+              </div>
+              <div className="rounded-xl border border-white/80 bg-white/80 p-3 shadow-sm">
+                <Mini label={t("dash.customersOwing")} value={localizeDigits(String(m.dueCustomers))} />
+              </div>
+              <div className="rounded-xl border border-white/80 bg-white/80 p-3 shadow-sm">
+                <Mini label={`${t("dash.newReceivable")} ${t(periodNameKey(period))}`} value={fmtMoney(m.receivableIncurred, currency)} />
+              </div>
+            </div>
           </div>
+
           <TopList
             rows={db.customers
               .map((c) => ({ c, due: customerDue(db, c.id, c.openingDue) }))
@@ -866,7 +972,7 @@ function modalNavLabel(key: StatKey): string {
 
 function Mini({ label, value, strong, tone }: { label: string; value: string; strong?: boolean; tone?: string }) {
   return (
-    <div className="rounded-lg border border-ink-100 bg-ink-50/50 px-3 py-2.5">
+    <div className="rounded-xl border border-white/70 bg-white/80 px-3 py-2.5 shadow-[0_12px_24px_-18px_rgba(15,23,42,0.7)] backdrop-blur-sm">
       <p className="text-[11px] font-medium text-ink-400">{label}</p>
       <p className={classNames("mt-0.5 text-base font-bold text-ink-900", strong && "text-lg", tone)}>{value}</p>
     </div>
@@ -878,11 +984,11 @@ function TopList({ title, rows, empty }: { title: string; rows: { name: string; 
     <div>
       <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-ink-400">{title}</p>
       {rows.length === 0 ? (
-        <p className="text-sm text-ink-400">{empty}</p>
+        <p className="rounded-xl border border-dashed border-ink-200 bg-slate-50/60 px-4 py-4 text-sm text-ink-400">{empty}</p>
       ) : (
-        <div className="divide-y divide-ink-100 rounded-lg border border-ink-100">
+        <div className="divide-y divide-ink-100 overflow-hidden rounded-2xl border border-ink-100 bg-white/80 shadow-[0_18px_30px_-28px_rgba(15,23,42,0.55)]">
           {rows.map((r, i) => (
-            <div key={i} className="flex items-center justify-between px-3 py-2 text-sm">
+            <div key={i} className="flex items-center justify-between px-3 py-2.5 text-sm transition-colors hover:bg-slate-50/80">
               <div className="min-w-0">
                 <p className="truncate font-medium text-ink-800">{r.name}</p>
                 {r.sub ? <p className="text-xs text-ink-400">{r.sub}</p> : null}
@@ -900,9 +1006,10 @@ function QuickAction({ icon, label, onClick }: { icon: React.ReactNode; label: s
   return (
     <button
       onClick={onClick}
-      className="inline-flex items-center gap-2 rounded-xl border border-ink-200 bg-white px-3.5 py-2 text-sm font-medium text-ink-700 shadow-card transition-all hover:border-brand-300 hover:text-brand-700 hover:shadow-pop"
+      className="group inline-flex items-center gap-2 rounded-2xl border border-slate-200/80 bg-white/80 px-3.5 py-2 text-sm font-medium text-slate-700 shadow-[0_16px_30px_-24px_rgba(15,23,42,0.7)] backdrop-blur-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-emerald-300 hover:bg-gradient-to-r hover:from-emerald-50 hover:to-cyan-50 hover:text-emerald-700 hover:shadow-[0_18px_32px_-22px_rgba(16,185,129,0.7)]"
     >
-      {icon} {label}
+      <span className="flex h-6 w-6 items-center justify-center rounded-lg bg-slate-100 text-slate-700 transition-colors group-hover:bg-emerald-100 group-hover:text-emerald-700">{icon}</span>
+      {label}
     </button>
   );
 }

@@ -313,6 +313,7 @@ export function buildSeedDB(): DB {
     purchases,
     customers,
     suppliers,
+    duePayments: [],
     expenses,
     staff,
     subscription: {

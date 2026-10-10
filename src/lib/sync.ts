@@ -11,7 +11,7 @@
  *   frontend does not care which storage the server picked.
  */
 import type { DB } from "../types";
-import { saveDB } from "./store";
+import { migrateDB, saveDB } from "./store";
 
 export type SyncStatus = "connecting" | "offline" | "syncing" | "synced" | "error";
 export type BackendMode = "unknown" | "supabase" | "file";
@@ -44,23 +44,37 @@ interface SyncMeta {
   apiBase: string | null;
 }
 
-function loadMeta(): SyncMeta {
+function safeRead<T>(key: string): T | null {
   try {
-    const raw = localStorage.getItem(META_KEY);
-    if (raw) {
-      const m = JSON.parse(raw) as Partial<SyncMeta>;
-      if (m.workspaceId) {
-        return {
-          workspaceId: m.workspaceId,
-          lastSyncedAt: m.lastSyncedAt || EPOCH,
-          tombstones: m.tombstones || [],
-          settingsDirty: !!m.settingsDirty,
-          apiBase: m.apiBase || null,
-        };
-      }
-    }
+    const raw = localStorage.getItem(key);
+    if (!raw) return null;
+    return JSON.parse(raw) as T;
   } catch {
-    /* fall through */
+    // Corrupt / blocked storage must never blank-screen the app.
+    // Quarantine the bad value so the next save starts clean.
+    try { localStorage.removeItem(key); } catch { /* ignore */ }
+    return null;
+  }
+}
+
+function safeWrite(key: string, value: string): void {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    /* private mode / quota — app keeps running in memory */
+  }
+}
+
+function loadMeta(): SyncMeta {
+  const m = safeRead<Partial<SyncMeta>>(META_KEY);
+  if (m?.workspaceId) {
+    return {
+      workspaceId: m.workspaceId,
+      lastSyncedAt: m.lastSyncedAt || EPOCH,
+      tombstones: m.tombstones || [],
+      settingsDirty: !!m.settingsDirty,
+      apiBase: m.apiBase || null,
+    };
   }
   return {
     // Shared default workspace so multiple devices sync with each other.
@@ -74,11 +88,7 @@ function loadMeta(): SyncMeta {
 }
 
 function persistMeta(meta: SyncMeta) {
-  try {
-    localStorage.setItem(META_KEY, JSON.stringify(meta));
-  } catch {
-    /* ignore */
-  }
+  safeWrite(META_KEY, JSON.stringify(meta));
 }
 
 async function fetchJson<T>(base: string, path: string, init?: RequestInit, timeoutMs = 8000): Promise<T> {
@@ -103,6 +113,7 @@ type CollectionKey =
   | "purchases"
   | "customers"
   | "suppliers"
+  | "duePayments"
   | "expenses"
   | "staff"
   | "subInvoices";
@@ -113,6 +124,7 @@ const COLLECTIONS: CollectionKey[] = [
   "purchases",
   "customers",
   "suppliers",
+  "duePayments",
   "expenses",
   "staff",
   "subInvoices",
@@ -156,6 +168,34 @@ function mergeDocs(local: DB, remote: DB, tombstones: Map<string, Tombstone>, ke
   return merged;
 }
 
+/** Newest record timestamp in a doc — used to decide push-vs-adopt on first sync. */
+function newestStamp(db: DB): string {
+  let newest = EPOCH;
+  const lists: { at?: string }[][] = [
+    db.sales as unknown as { at?: string }[],
+    db.purchases as unknown as { at?: string }[],
+    db.expenses as unknown as { at?: string }[],
+    db.customers as unknown as { at?: string }[],
+  ];
+  for (const list of lists) {
+    for (const r of list) {
+      if (r?.at && r.at > newest) newest = r.at;
+    }
+  }
+  return newest;
+}
+
+/** Does the local doc hold real business data (not just demo seed)? */
+function localHasBusinessData(db: DB): boolean {
+  return (
+    db.sales.length > 0 ||
+    db.purchases.length > 0 ||
+    db.expenses.length > 0 ||
+    db.customers.length > 0 ||
+    db.products.length > 0
+  );
+}
+
 interface HealthResponse {
   ok: boolean;
   mode: BackendMode;
@@ -183,6 +223,7 @@ class SyncEngine {
   private pushTimer: ReturnType<typeof setTimeout> | null = null;
   private pollTimer: ReturnType<typeof setInterval> | null = null;
   private started = false;
+  private accessToken: (() => Promise<string | null>) | null = null;
 
   /** Set by the app so remote merges/adoptions can update React state. */
   onReplace: ((db: DB) => void) | null = null;
@@ -208,6 +249,22 @@ class SyncEngine {
   private emit(patch: Partial<SyncSnapshot>) {
     this.snapshot = { ...this.snapshot, ...patch };
     for (const fn of this.listeners) fn();
+  }
+
+  private async authenticatedJson<T>(base: string, path: string, init?: RequestInit): Promise<T> {
+    const token = await this.accessToken?.();
+    // Offline/file mode has no hosted auth — sync anonymously against the
+    // local Express store. Supabase mode still requires the Bearer token.
+    if (!token) {
+      try {
+        return await fetchJson<T>(base, path, init);
+      } catch {
+        throw new Error("Your sign-in session has expired. Please sign in again.");
+      }
+    }
+    const headers = new Headers(init?.headers);
+    headers.set("Authorization", `Bearer ${token}`);
+    return fetchJson<T>(base, path, { ...init, headers });
   }
 
   private setMeta(patch: Partial<SyncMeta>) {
@@ -239,7 +296,22 @@ class SyncEngine {
   }
 
   /** Called once after the local DB is loaded. */
-  async start(db: DB) {
+  async start(db: DB, workspaceId: string, accessToken: () => Promise<string | null>) {
+    if (this.started) this.stop();
+    // FIX: never reset lastSyncedAt/tombstones here. The previous line wiped
+    // the sync cursor on every login/reload, so initialSync() always took the
+    // "first sync → adopt server wholesale" branch and discarded same-day
+    // local sales made while offline. Keep the persisted cursor; only scope
+    // to the new workspace (a workspace switch legitimately needs a resync).
+    const prev = loadMeta();
+    const switched = prev.workspaceId !== workspaceId;
+    this.setMeta({
+      workspaceId,
+      lastSyncedAt: switched ? EPOCH : prev.lastSyncedAt,
+      tombstones: switched ? [] : prev.tombstones,
+      settingsDirty: false,
+    });
+    this.accessToken = accessToken;
     this.db = db;
     if (this.started) return;
     this.started = true;
@@ -260,9 +332,22 @@ class SyncEngine {
     }
   }
 
+  stop() {
+    if (this.pushTimer) clearTimeout(this.pushTimer);
+    if (this.pollTimer) clearInterval(this.pollTimer);
+    this.pushTimer = null;
+    this.pollTimer = null;
+    window.removeEventListener("online", this.onOnline);
+    document.removeEventListener("visibilitychange", this.onVisible);
+    this.started = false;
+    this.accessToken = null;
+    this.db = null;
+    this.emit({ status: "offline", pendingPush: false, error: null });
+  }
+
   private async initialSync(base: string) {
     this.emit({ status: "syncing" });
-    const remote = await fetchJson<DbResponse>(base, `/db/${this.meta.workspaceId}`);
+    const remote = await this.authenticatedJson<DbResponse>(base, `/db/${this.meta.workspaceId}`);
 
     if (!remote.found || !remote.db) {
       // Fresh server: upload what we have locally.
@@ -272,14 +357,22 @@ class SyncEngine {
 
     const serverUpdated = remote.updatedAt;
 
+    const remoteDb = migrateDB(remote.db);
+
     if (this.meta.lastSyncedAt === EPOCH) {
-      // First sync on this device: adopt the server document wholesale so a
-      // device joining an existing workspace gets exactly its data (no duplicate
-      // seed records). Offline-created data that was never pushed would be lost,
-      // but by definition it was never synced anywhere.
-      this.db = remote.db;
-      saveDB(remote.db);
-      this.onReplace?.(remote.db);
+      // First sync on this device: normally adopt the server document so a
+      // device joining an existing workspace gets exactly its data.
+      // SAFETY: if the local doc actually has business data newer than the
+      // server stamp (e.g. sales made offline before first login), merge and
+      // push instead of discarding them.
+      const localNewest = this.db ? newestStamp(this.db) : EPOCH;
+      if (this.db && localHasBusinessData(this.db) && localNewest > serverUpdated) {
+        await this.pushNow();
+        return;
+      }
+      this.db = remoteDb;
+      saveDB(remoteDb);
+      this.onReplace?.(remoteDb);
       this.setMeta({ lastSyncedAt: serverUpdated, settingsDirty: false });
       this.emit({ status: "synced", mode: remote.mode, lastSyncedAt: serverUpdated, error: null });
       return;
@@ -294,7 +387,7 @@ class SyncEngine {
     const remoteTomb = new Map(remote.tombstones.map((t) => [t.id, t]));
     const local = this.db;
     if (local) {
-      const merged = mergeDocs(local, remote.db, remoteTomb, this.meta.settingsDirty);
+      const merged = mergeDocs(local, remoteDb, remoteTomb, this.meta.settingsDirty);
       this.db = merged;
       saveDB(merged);
       this.onReplace?.(merged);
@@ -328,7 +421,7 @@ class SyncEngine {
     }
     this.emit({ status: "syncing" });
     try {
-      const res = await fetchJson<{ updatedAt: string }>(base, `/db/${this.meta.workspaceId}`, {
+      const res = await this.authenticatedJson<{ updatedAt: string }>(base, `/db/${this.meta.workspaceId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ db: this.db, tombstones: this.meta.tombstones }),
@@ -348,7 +441,7 @@ class SyncEngine {
     const base = this.meta.apiBase;
     if (!base || !this.db) return;
     try {
-      const res = await fetchJson<SyncResponse>(
+      const res = await this.authenticatedJson<SyncResponse>(
         base,
         `/sync/${this.meta.workspaceId}?since=${encodeURIComponent(this.meta.lastSyncedAt)}`,
       );
@@ -358,10 +451,10 @@ class SyncEngine {
         if (this.snapshot.pendingPush) await this.pushNow();
         return;
       }
-      const remote = await fetchJson<DbResponse>(base, `/db/${this.meta.workspaceId}`);
+      const remote = await this.authenticatedJson<DbResponse>(base, `/db/${this.meta.workspaceId}`);
       if (!remote.found || !remote.db) return;
       const tomb = new Map([...this.meta.tombstones, ...remote.tombstones].map((t) => [t.id, t]));
-      const merged = mergeDocs(this.db, remote.db, tomb, this.meta.settingsDirty);
+      const merged = mergeDocs(this.db, migrateDB(remote.db), tomb, this.meta.settingsDirty);
       this.db = merged;
       saveDB(merged);
       this.onReplace?.(merged);

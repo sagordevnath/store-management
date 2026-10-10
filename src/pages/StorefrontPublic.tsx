@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import type { DB, Product } from "../types";
 import { catalogFor, placeStorefrontOrder } from "../lib/storefront";
+import { scopedKeyFor, defaultScope } from "../lib/store";
 import { fmtMoney, classNames } from "../lib/helpers";
 import { IcStore, IcCheck } from "../icons";
 
@@ -54,15 +55,29 @@ export function StorefrontPublic({ db, slug }: { db: DB; slug: string }) {
     });
     setPlaced(res.ok ? { ok: true, msg: `Order received! ${db.settings.shopName} will call you at ${phone} to confirm.` } : { ok: false, msg: res.error });
     if (res.ok) {
-      // Persist the order into the shared localStorage document so the owner sees it.
+      // No-auth shopper: push the order through the public API when the server
+      // is reachable; always ALSO mirror into the shared workspace-scoped
+      // localStorage key so the owner sees it on this same device even offline.
+      // Uses scopedKeyFor(defaultScope()) — never the hardcoded legacy key.
+      void (async () => {
+        try {
+          await fetch("/api/storefront-orders", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ order: res.order }),
+          });
+        } catch { /* offline — local mirror below is the fallback */ }
+      })();
       try {
-        const raw = localStorage.getItem("Managix_db_v1");
+        const raw = localStorage.getItem(scopedKeyFor(defaultScope()));
         if (raw) {
           const stored = JSON.parse(raw) as DB;
-          stored.storefrontOrders = [res.order, ...stored.storefrontOrders];
-          localStorage.setItem("Managix_db_v1", JSON.stringify(stored));
+          if (stored && Array.isArray(stored.storefrontOrders) && !stored.storefrontOrders.some((o) => o.id === res.order.id)) {
+            stored.storefrontOrders = [res.order, ...stored.storefrontOrders];
+            localStorage.setItem(scopedKeyFor(defaultScope()), JSON.stringify(stored));
+          }
         }
-      } catch { /* storage unavailable */ }
+      } catch { /* corrupt / blocked storage — server copy is the fallback */ }
       setCart({});
       setName(""); setPhone(""); setAddress(""); setNote("");
     }

@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useApp } from "../App";
 import type { Customer, PriceTier } from "../types";
-import { upsertCustomer, customerDue, customerDueList, collectDue } from "../lib/store";
+import { upsertCustomer, customerDue, customerDueList, collectDue, collectCustomerOpeningDue } from "../lib/store";
 import { softDelete } from "../lib/recycle";
 import { logAudit } from "../lib/audit";
 import { fmtMoney, fmtDate, initials, uid, downloadCSV } from "../lib/helpers";
@@ -14,7 +14,7 @@ export default function CustomersPage() {
   const [search, setSearch] = useState("");
   const [editing, setEditing] = useState<Customer | null>(null);
   const [ledgerFor, setLedgerFor] = useState<Customer | null>(null);
-  const [collectFor, setCollectFor] = useState<{ customer: Customer; saleId: string; amount: number; max: number } | null>(null);
+  const [collectFor, setCollectFor] = useState<{ customer: Customer; saleId: string | null; amount: number; max: number } | null>(null);
   const [amount, setAmount] = useState(0);
   const [confirmDelete, setConfirmDelete] = useState<Customer | null>(null);
 
@@ -32,36 +32,60 @@ export default function CustomersPage() {
   }, [db, search]);
 
   const totalDue = rows.reduce((s, r) => s + r.due, 0);
+  const activeDues = rows.filter((r) => r.due > 0.009);
 
-  const ledgerSales = ledgerFor ? customerDueList(db, ledgerFor.id) : [];
-  const ledgerOtherSales = ledgerFor
-    ? db.sales.filter((s) => s.customerId === ledgerFor.id).sort((a, b) => (a.at < b.at ? 1 : -1)).slice(0, 8)
+  const ledgerCustomer = ledgerFor ? db.customers.find((c) => c.id === ledgerFor.id) ?? ledgerFor : null;
+  const ledgerSales = ledgerCustomer ? customerDueList(db, ledgerCustomer.id) : [];
+  const ledgerOtherSales = ledgerCustomer
+    ? db.sales.filter((s) => s.customerId === ledgerCustomer.id).sort((a, b) => (a.at < b.at ? 1 : -1)).slice(0, 8)
     : [];
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-bold text-ink-900">Customers</h1>
-          <p className="text-sm text-ink-500">
-            {db.customers.length} customers · <span className="font-semibold text-red-600">{fmtMoney(totalDue, currency)}</span> total dues
-          </p>
+      <div className="rounded-3xl border border-slate-800/60 bg-gradient-to-r from-slate-950 via-slate-900 to-emerald-950 p-4 text-white shadow-[0_24px_50px_-28px_rgba(16,185,129,0.7)]">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-emerald-300">Receivables</p>
+            <h1 className="mt-1 text-xl font-bold text-white">Customers</h1>
+            <p className="mt-1 text-sm text-slate-300">
+              {db.customers.length} customers · <span className="font-semibold text-red-200">{fmtMoney(totalDue, currency)}</span> total dues
+            </p>
+          </div>
+          <div className="flex gap-2">
+            <Button
+              variant="secondary"
+              onClick={() =>
+                downloadCSV("customers.csv", [
+                  ["Name", "Tier", "Phone", "Address", "Total purchases", "Points", "Current due", "Credit limit"],
+                  ...rows.map(({ c, due, purchases }) => [c.name, c.tier, c.phone, c.address, purchases, c.points, due, c.creditLimit]),
+                ])
+              }
+              className="border-white/15 bg-white/5 text-white hover:bg-white/10 hover:text-white"
+            >
+              <IcDownload size={15} /> Export
+            </Button>
+            <Button onClick={() => setEditing({ id: uid("c"), name: "", phone: "", address: "", openingDue: 0, createdAt: new Date().toISOString(), tier: "retail", creditLimit: 0, points: 0 })} className="bg-emerald-500 text-white hover:bg-emerald-400">
+              <IcPlus size={16} /> Add customer
+            </Button>
+          </div>
         </div>
-        <div className="flex gap-2">
-          <Button
-            variant="secondary"
-            onClick={() =>
-              downloadCSV("customers.csv", [
-                ["Name", "Tier", "Phone", "Address", "Total purchases", "Points", "Current due", "Credit limit"],
-                ...rows.map(({ c, due, purchases }) => [c.name, c.tier, c.phone, c.address, purchases, c.points, due, c.creditLimit]),
-              ])
-            }
-          >
-            <IcDownload size={15} /> Export
-          </Button>
-          <Button onClick={() => setEditing({ id: uid("c"), name: "", phone: "", address: "", openingDue: 0, createdAt: new Date().toISOString(), tier: "retail", creditLimit: 0, points: 0 })}>
-            <IcPlus size={16} /> Add customer
-          </Button>
+      </div>
+
+      <div className="grid gap-3 md:grid-cols-3">
+        <div className="rounded-2xl border border-red-100 bg-gradient-to-br from-red-50 via-white to-rose-100/90 p-4 shadow-[0_16px_30px_-26px_rgba(239,68,68,0.8)]">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-red-500">Outstanding</p>
+          <p className="mt-2 text-2xl font-bold text-red-600">{fmtMoney(totalDue, currency)}</p>
+          <p className="mt-1 text-xs text-ink-500">Total customer receivables</p>
+        </div>
+        <div className="rounded-2xl border border-amber-100 bg-gradient-to-br from-amber-50 via-white to-yellow-100/90 p-4 shadow-[0_16px_30px_-26px_rgba(245,158,11,0.8)]">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-amber-500">Accounts</p>
+          <p className="mt-2 text-2xl font-bold text-amber-600">{activeDues.length}</p>
+          <p className="mt-1 text-xs text-ink-500">Customers with due balances</p>
+        </div>
+        <div className="rounded-2xl border border-emerald-100 bg-gradient-to-br from-emerald-50 via-white to-cyan-100/90 p-4 shadow-[0_16px_30px_-26px_rgba(16,185,129,0.8)]">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-emerald-500">Expected</p>
+          <p className="mt-2 text-2xl font-bold text-emerald-600">{fmtMoney(activeDues.reduce((s, r) => s + r.due, 0), currency)}</p>
+          <p className="mt-1 text-xs text-ink-500">Expected collection value</p>
         </div>
       </div>
 
@@ -85,36 +109,41 @@ export default function CustomersPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-ink-100">
-                {rows.map(({ c, due, purchases, spend }) => (
-                  <tr key={c.id} className="hover:bg-ink-50/60">
-                    <Td>
-                      <div className="flex items-center gap-2.5">
-                        <span className="flex h-8 w-8 items-center justify-center rounded-full bg-brand-50 text-[11px] font-bold text-brand-700">{initials(c.name)}</span>
-                        <div><p className="font-medium text-ink-900">{c.name}</p><p className="text-xs text-ink-400">{fmtMoney(spend, currency)} lifetime</p></div>
-                      </div>
-                    </Td>
-                    <Td>
-                      <Badge tone={c.tier === "distributor" ? "violet" : c.tier === "wholesale" ? "blue" : "neutral"}>
-                        {c.tier === "retail" ? "Retail" : c.tier === "wholesale" ? "Wholesale" : "Distributor"}
-                      </Badge>
-                    </Td>
-                    <Td className="text-ink-500">{c.phone || "—"}</Td>
-                    <Td className="text-right text-ink-500">{purchases}</Td>
-                    <Td className="text-right font-medium text-violet-700">{c.points}</Td>
-                    <Td className="text-right font-semibold">
-                      {due > 0.009 ? <span className="text-red-600">{fmtMoney(due, currency)}</span> : <span className="text-ink-300">—</span>}
-                      {c.creditLimit > 0 ? <span className="block text-[11px] text-ink-400">/ {fmtMoney(c.creditLimit, currency)}</span> : null}
-                    </Td>
-                    <Td><Badge tone={due > 0.009 ? "amber" : "green"}>{due > 0.009 ? "Has due" : "Clear"}</Badge></Td>
-                    <Td>
-                      <div className="flex items-center justify-end gap-1">
-                        <Button size="sm" variant="ghost" onClick={() => setLedgerFor(c)}>Ledger</Button>
-                        <Button size="sm" variant="ghost" onClick={() => setEditing(c)}><IcEdit size={14} /></Button>
-                        <Button size="sm" variant="ghost" className="text-red-500 hover:bg-red-50" onClick={() => setConfirmDelete(c)}><IcTrash size={14} /></Button>
-                      </div>
-                    </Td>
-                  </tr>
-                ))}
+                {rows.map(({ c, due, purchases, spend }) => {
+                  const dueInvoices = customerDueList(db, c.id);
+                  const dueCount = dueInvoices.length;
+                  return (
+                    <tr key={c.id} className="hover:bg-ink-50/60">
+                      <Td>
+                        <div className="flex items-center gap-2.5">
+                          <span className="flex h-8 w-8 items-center justify-center rounded-full bg-brand-50 text-[11px] font-bold text-brand-700">{initials(c.name)}</span>
+                          <div><p className="font-medium text-ink-900">{c.name}</p><p className="text-xs text-ink-400">{fmtMoney(spend, currency)} lifetime</p></div>
+                        </div>
+                      </Td>
+                      <Td>
+                        <Badge tone={c.tier === "distributor" ? "violet" : c.tier === "wholesale" ? "blue" : "neutral"}>
+                          {c.tier === "retail" ? "Retail" : c.tier === "wholesale" ? "Wholesale" : "Distributor"}
+                        </Badge>
+                      </Td>
+                      <Td className="text-ink-500">{c.phone || "—"}</Td>
+                      <Td className="text-right text-ink-500">{purchases}</Td>
+                      <Td className="text-right font-medium text-violet-700">{c.points}</Td>
+                      <Td className="text-right font-semibold">
+                        {due > 0.009 ? <span className="text-red-600">{fmtMoney(due, currency)}</span> : <span className="text-ink-300">—</span>}
+                        {c.creditLimit > 0 ? <span className="block text-[11px] text-ink-400">/ {fmtMoney(c.creditLimit, currency)}</span> : null}
+                        {dueCount > 0 ? <span className="mt-1 block text-[10px] font-medium text-amber-600">{dueCount} invoice{dueCount === 1 ? "" : "s"} due</span> : null}
+                      </Td>
+                      <Td><Badge tone={due > 0.009 ? "amber" : "green"}>{due > 0.009 ? "Has due" : "Clear"}</Badge></Td>
+                      <Td>
+                        <div className="flex items-center justify-end gap-1">
+                          <Button size="sm" variant="ghost" onClick={() => setLedgerFor(c)}>Ledger</Button>
+                          <Button size="sm" variant="ghost" onClick={() => setEditing(c)}><IcEdit size={14} /></Button>
+                          <Button size="sm" variant="ghost" className="text-red-500 hover:bg-red-50" onClick={() => setConfirmDelete(c)}><IcTrash size={14} /></Button>
+                        </div>
+                      </Td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -122,30 +151,48 @@ export default function CustomersPage() {
       </Card>
 
       {/* Ledger modal — digital khata */}
-      <Modal open={!!ledgerFor} onClose={() => setLedgerFor(null)} title={ledgerFor ? `Ledger — ${ledgerFor.name}` : ""} wide>
-        {ledgerFor ? (
+      <Modal open={!!ledgerCustomer} onClose={() => setLedgerFor(null)} title={ledgerCustomer ? `Ledger — ${ledgerCustomer.name}` : ""} wide>
+        {ledgerCustomer ? (
           <div className="space-y-4">
             <div className="grid grid-cols-3 gap-3">
               <div className="rounded-xl bg-red-50 p-3 ring-1 ring-red-100">
                 <p className="text-xs text-red-500">Total due</p>
-                <p className="text-lg font-bold text-red-600">{fmtMoney(customerDue(db, ledgerFor.id, ledgerFor.openingDue), currency)}</p>
+                <p className="text-lg font-bold text-red-600">{fmtMoney(customerDue(db, ledgerCustomer.id, ledgerCustomer.openingDue), currency)}</p>
               </div>
               <div className="rounded-xl bg-ink-50 p-3">
                 <p className="text-xs text-ink-500">Phone</p>
-                <p className="text-sm font-semibold text-ink-800">{ledgerFor.phone || "—"}</p>
+                <p className="text-sm font-semibold text-ink-800">{ledgerCustomer.phone || "—"}</p>
               </div>
               <div className="rounded-xl bg-ink-50 p-3">
                 <p className="text-xs text-ink-500">Address</p>
-                <p className="truncate text-sm font-semibold text-ink-800">{ledgerFor.address || "—"}</p>
+                <p className="truncate text-sm font-semibold text-ink-800">{ledgerCustomer.address || "—"}</p>
               </div>
             </div>
 
             <div>
-              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-ink-500">Credit sales with due</p>
-              {ledgerSales.length === 0 ? (
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-ink-500">Outstanding balances</p>
+              {ledgerSales.length === 0 && ledgerCustomer.openingDue <= 0.009 ? (
                 <p className="rounded-lg border border-dashed border-ink-200 px-4 py-5 text-center text-sm text-ink-400">No outstanding credit sales.</p>
               ) : (
                 <div className="divide-y divide-ink-100 rounded-lg border border-ink-200">
+                  {ledgerCustomer.openingDue > 0.009 ? (
+                    <div className="flex items-center justify-between gap-3 px-3.5 py-2.5">
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium text-ink-900">Opening balance</p>
+                        <p className="text-xs text-ink-400">Balance owed before joining the app</p>
+                      </div>
+                      <div className="flex items-center gap-2.5">
+                        <span className="text-sm font-bold text-red-600">{fmtMoney(ledgerCustomer.openingDue, currency)}</span>
+                        <Button size="sm" variant="success" onClick={() => {
+                          const due = ledgerCustomer.openingDue;
+                          setCollectFor({ customer: ledgerCustomer, saleId: null, amount: due, max: due });
+                          setAmount(due);
+                        }}>
+                          <IcCash size={13} /> Collect
+                        </Button>
+                      </div>
+                    </div>
+                  ) : null}
                   {ledgerSales.map((s) => {
                     const due = Math.round((s.total - s.paidAmount) * 100) / 100;
                     return (
@@ -156,7 +203,7 @@ export default function CustomersPage() {
                         </div>
                         <div className="flex items-center gap-2.5">
                           <span className="text-sm font-bold text-red-600">{fmtMoney(due, currency)}</span>
-                          <Button size="sm" variant="success" onClick={() => { setCollectFor({ customer: ledgerFor, saleId: s.id, amount: due, max: due }); setAmount(due); }}>
+                          <Button size="sm" variant="success" onClick={() => { setCollectFor({ customer: ledgerCustomer, saleId: s.id, amount: due, max: due }); setAmount(due); }}>
                             <IcCash size={13} /> Collect
                           </Button>
                         </div>
@@ -192,9 +239,11 @@ export default function CustomersPage() {
         footer={
           <div className="flex justify-end gap-2">
             <Button variant="secondary" onClick={() => setCollectFor(null)}>Cancel</Button>
-            <Button variant="success" disabled={amount <= 0} onClick={() => {
+            <Button variant="success" disabled={amount <= 0 || amount > (collectFor?.max ?? 0)} onClick={() => {
               if (!collectFor) return;
-              update((d) => collectDue(d, collectFor.saleId, amount));
+              update((d) => collectFor.saleId
+                ? collectDue(d, collectFor.saleId, amount)
+                : collectCustomerOpeningDue(d, collectFor.customer.id, amount));
               toast(`Collected ${fmtMoney(amount, currency)} from ${collectFor.customer.name}`);
               setCollectFor(null);
             }}>
@@ -204,7 +253,7 @@ export default function CustomersPage() {
         }
       >
         <Field label="Amount received" hint={`Outstanding on this invoice: ${fmtMoney(collectFor?.max ?? 0, currency)}`}>
-          <NumberInput value={amount} min={0} step="0.01" onChange={(e) => setAmount(Number(e.target.value) || 0)} />
+          <NumberInput value={amount} min={0} max={collectFor?.max} step="0.01" onChange={(e) => setAmount(Number(e.target.value) || 0)} />
         </Field>
       </Modal>
 

@@ -1,29 +1,20 @@
 import React, { useContext, useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import type { Session } from "@supabase/supabase-js";
 import type { DB } from "./types";
-import { loadDB, saveDB, resetDB, computeKpis } from "./lib/store";
+import { createShopDB, loadDBIfPresent, saveDB, resetDB, setDBStorageScope, computeKpis } from "./lib/store";
 import { syncEngine, type SyncSnapshot } from "./lib/sync";
 import { tickSubscriptions, daysLeft } from "./lib/billing";
 import { planName, subStateSummary, hasFeature } from "./lib/plans";
 import { fmtMoney, initials, classNames } from "./lib/helpers";
-import { getStoredLang, storeLang, makeT, langInfo, setActiveLang, type Lang, type TFn } from "./lib/i18n";
+import { getStoredLang, storeLang, makeT, langInfo, type Lang, type TFn } from "./lib/i18n";
 import { LanguageMenu } from "./LanguageMenu";
 import { Badge, Button, Card, Modal, ToastProvider, useDarkMode, useToast } from "./ui";
 import {
   IcDashboard, IcCart, IcBox, IcSale, IcTruck, IcUsers, IcBuilding, IcWallet,
   IcChart, IcStaff, IcSettings, IcSearch, IcLogout, IcStore, IcAlert,
-  IcCategories, IcCrown, IcTools, IcRefresh, IcGlobe, IcQr, IcChat, IcMegaphone, IcShield, IcTrashRestore,
+  IcCategories, IcCrown, IcTools, IcRefresh, IcCash, IcGlobe, IcChat, IcShield,
+  IcTrashRestore,
 } from "./icons";
-import type { ModuleKey } from "./types";
-import { accountFor, signedInUsername, canView, canDelete } from "./lib/access";
-import { setActor } from "./lib/actor";
-import { purgeExpired } from "./lib/recycle";
-import WalletPage from "./pages/WalletPage";
-import MessagesPage from "./pages/MessagesPage";
-import StorefrontPage from "./pages/StorefrontPage";
-import AccessPage from "./pages/AccessPage";
-import RecyclePage from "./pages/RecyclePage";
-import { StorefrontPublic } from "./pages/StorefrontPublic";
-import { applyPreset, PRESETS } from "./lib/onboarding";
 import DashboardPage from "./pages/DashboardPage";
 import PosPage from "./pages/PosPage";
 import ProductsPage from "./pages/ProductsPage";
@@ -39,40 +30,49 @@ import CategoriesPage from "./pages/CategoriesPage";
 import BillingPage from "./pages/BillingPage";
 import ToolsPage from "./pages/ToolsPage";
 import ReturnsPage from "./pages/ReturnsPage";
+import DueBookPage from "./pages/DueBookPage";
+import StorefrontPage from "./pages/StorefrontPage";
+import WalletPage from "./pages/WalletPage";
+import MessagesPage from "./pages/MessagesPage";
+import AccessPage from "./pages/AccessPage";
+import RecyclePage from "./pages/RecyclePage";
 import SuperAdminPage from "./pages/SuperAdminPage";
 import SupportChat from "./pages/SupportChat";
+import { StorefrontPublic } from "./pages/StorefrontPublic";
 import { LoginPage } from "./pages/LoginPage";
+import { supabase } from "./lib/supabase";
 
 export type PageKey =
   | "dashboard" | "pos" | "products" | "categories" | "sales" | "purchases"
   | "customers" | "suppliers" | "expenses" | "reports" | "staff" | "settings"
-  | "billing" | "tools" | "returns"
+  | "billing" | "tools" | "returns" | "dueBook"
   | "storefront" | "wallet" | "messages" | "access" | "recycle";
 
-const NAV: { key: PageKey; label: string; icon: (p: { size?: number; className?: string }) => React.ReactNode; group: string; module: ModuleKey }[] = [
-  { key: "dashboard", label: "nav.dashboard", icon: IcDashboard, group: "group.overview", module: "dashboard" },
-  { key: "pos", label: "nav.pos", icon: IcCart, group: "group.daily", module: "pos" },
-  { key: "sales", label: "nav.sales", icon: IcSale, group: "group.daily", module: "sales" },
-  { key: "purchases", label: "nav.purchases", icon: IcTruck, group: "group.daily", module: "purchases" },
-  { key: "returns", label: "nav.returns", icon: IcRefresh, group: "group.daily", module: "returns" },
-  { key: "products", label: "nav.products", icon: IcBox, group: "group.catalog", module: "products" },
-  { key: "categories", label: "nav.categories", icon: IcCategories, group: "group.catalog", module: "categories" },
-  { key: "customers", label: "nav.customers", icon: IcUsers, group: "group.people", module: "customers" },
-  { key: "suppliers", label: "nav.suppliers", icon: IcBuilding, group: "group.people", module: "suppliers" },
-  { key: "staff", label: "nav.staff", icon: IcStaff, group: "group.people", module: "staff" },
-  { key: "storefront", label: "nav.storefront", icon: IcGlobe, group: "group.growth", module: "storefront" },
-  { key: "wallet", label: "nav.wallet", icon: IcQr, group: "group.growth", module: "wallet" },
-  { key: "messages", label: "nav.messages", icon: IcChat, group: "group.growth", module: "messages" },
-  { key: "expenses", label: "nav.expenses", icon: IcWallet, group: "group.finance", module: "expenses" },
-  { key: "reports", label: "nav.reports", icon: IcChart, group: "group.finance", module: "reports" },
-  { key: "tools", label: "nav.tools", icon: IcTools, group: "group.finance", module: "tools" },
-  { key: "access", label: "nav.access", icon: IcShield, group: "group.account", module: "access" },
-  { key: "recycle", label: "nav.recycle", icon: IcTrashRestore, group: "group.account", module: "recycle" },
-  { key: "billing", label: "nav.billing", icon: IcCrown, group: "group.account", module: "billing" },
-  { key: "settings", label: "nav.settings", icon: IcSettings, group: "group.account", module: "settings" },
+const NAV: { key: PageKey; label: string; icon: (p: { size?: number; className?: string }) => React.ReactNode; group: string }[] = [
+  { key: "dashboard", label: "nav.dashboard", icon: IcDashboard, group: "group.overview" },
+  { key: "pos", label: "nav.pos", icon: IcCart, group: "group.daily" },
+  { key: "sales", label: "nav.sales", icon: IcSale, group: "group.daily" },
+  { key: "purchases", label: "nav.purchases", icon: IcTruck, group: "group.daily" },
+  { key: "returns", label: "nav.returns", icon: IcRefresh, group: "group.daily" },
+  { key: "products", label: "nav.products", icon: IcBox, group: "group.catalog" },
+  { key: "categories", label: "nav.categories", icon: IcCategories, group: "group.catalog" },
+  { key: "customers", label: "nav.customers", icon: IcUsers, group: "group.people" },
+  { key: "suppliers", label: "nav.suppliers", icon: IcBuilding, group: "group.people" },
+  { key: "staff", label: "nav.staff", icon: IcStaff, group: "group.people" },
+  { key: "expenses", label: "nav.expenses", icon: IcWallet, group: "group.finance" },
+  { key: "dueBook", label: "nav.dueBook", icon: IcCash, group: "group.finance" },
+  { key: "reports", label: "nav.reports", icon: IcChart, group: "group.finance" },
+  { key: "tools", label: "nav.tools", icon: IcTools, group: "group.finance" },
+  { key: "storefront", label: "nav.storefront", icon: IcGlobe, group: "group.growth" },
+  { key: "wallet", label: "nav.wallet", icon: IcWallet, group: "group.growth" },
+  { key: "messages", label: "nav.messages", icon: IcChat, group: "group.growth" },
+  { key: "access", label: "nav.access", icon: IcShield, group: "group.account" },
+  { key: "recycle", label: "nav.recycle", icon: IcTrashRestore, group: "group.account" },
+  { key: "billing", label: "nav.billing", icon: IcCrown, group: "group.account" },
+  { key: "settings", label: "nav.settings", icon: IcSettings, group: "group.account" },
 ];
 
-const NAV_GROUPS = ["group.overview", "group.daily", "group.catalog", "group.people", "group.growth", "group.finance", "group.account"];
+const NAV_GROUPS = ["group.overview", "group.daily", "group.catalog", "group.people", "group.finance", "group.growth", "group.account"];
 
 export interface Ctx {
   db: DB;
@@ -84,8 +84,6 @@ export interface Ctx {
   lang: Lang;
   setLang: (l: Lang) => void;
   t: TFn;
-  account: import("./types").StaffAccount | null;
-  can: (module: ModuleKey, level?: "view" | "edit" | "all") => boolean;
 }
 
 const CtxReact = React.createContext<Ctx | null>(null);
@@ -96,10 +94,90 @@ export function useApp(): Ctx {
 }
 
 export default function App() {
-  const [db, setDb] = useState<DB | null>(null);
+  return (
+    <BootErrorBoundary>
+      <AppInner />
+    </BootErrorBoundary>
+  );
+}
+
+/** Last-resort safety net: any boot/render crash shows recovery UI, never a blank page. */
+class BootErrorBoundary extends React.Component<{ children: React.ReactNode }, { error: string | null }> {
+  state = { error: null as string | null };
+  static getDerivedStateFromError(err: unknown) {
+    return { error: err instanceof Error ? err.message : "Something went wrong starting the app." };
+  }
+  componentDidCatch() { /* keep the recovery screen; details already captured */ }
+  render() {
+    if (!this.state.error) return this.props.children;
+    const reset = () => {
+      try {
+        // Quarantine every Managix key, keep a timestamped backup of the main DB.
+        for (let i = localStorage.length - 1; i >= 0; i--) {
+          const k = localStorage.key(i);
+          if (k && k.startsWith("Managix_")) {
+            if (k.startsWith("Managix_db_v1")) {
+              try {
+                const raw = localStorage.getItem(k);
+                if (raw) localStorage.setItem(`${k}.corrupt.${Date.now()}`, raw);
+              } catch { /* ignore */ }
+            }
+            localStorage.removeItem(k);
+          }
+        }
+      } catch { /* ignore */ }
+      window.location.hash = "";
+      window.location.reload();
+    };
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-ink-50 px-6">
+        <div className="w-full max-w-md rounded-2xl border border-ink-200 bg-white p-8 text-center shadow-card">
+          <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-red-100 text-2xl">⚠️</div>
+          <h1 className="text-lg font-bold text-ink-900">Managix couldn't start</h1>
+          <p className="mt-2 text-sm text-ink-500">
+            Your saved data looks corrupted (often after a failed deploy or full storage). Your data is backed up in this
+            browser — resetting loads a fresh demo so you can keep working.
+          </p>
+          <p className="mt-2 rounded-lg bg-ink-50 px-3 py-2 text-left text-xs text-ink-400">{this.state.error}</p>
+          <div className="mt-4 flex gap-2">
+            <Button className="flex-1" onClick={() => window.location.reload()}>Try again</Button>
+            <Button variant="secondary" className="flex-1" onClick={reset}>Reset to fresh demo</Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+}
+
+function AppInner() {
+  // Seed data builds a large demo document — build it lazily so a slow device
+  // still paints the loading screen instead of blocking on first paint.
+  // If even the seed fails (out of memory), boot with a minimal empty shell.
+  const [db, setDb] = useState<DB>(() => {
+    try {
+      return createShopDB("");
+    } catch {
+      // Absolute last resort: minimal shell so the app can still render.
+      return {
+        products: [], categories: [], sales: [], purchases: [], customers: [],
+        suppliers: [], duePayments: [], expenses: [], staff: [], subInvoices: [],
+        saleReturns: [], purchaseReturns: [], branches: [], accounts: [], audit: [],
+        trash: [], wallet: [], walletAccounts: [], threads: [], reminders: [],
+        campaigns: [], storefrontOrders: [],
+        subscription: { tier: "trial", status: "trialing", billingCycle: "monthly", startedAt: new Date().toISOString(), currentPeriodEnd: new Date(Date.now() + 14 * 86400000).toISOString(), autoRenew: false, paymentMethod: null, couponCode: null, couponRedeemsLeft: 0, canceledAt: null },
+        settings: { shopName: "", tagline: "", currency: "$", taxRate: 0, lowStockDefault: 5, ownerName: "", monthlyTarget: 0, branches: 1, loyaltyEnabled: false, loyaltyRate: 1, pointValue: 1 },
+        storefront: { enabled: false, slug: "", customDomain: "", theme: { accent: "#1f6a4c", hero: "", banner: null, font: "modern" }, visibleCategoryIds: null, minOrder: 0, deliveryFee: 0 },
+        onboarding: null,
+      } as DB;
+    }
+  });
+  const [session, setSession] = useState<Session | null>(null);
+  const [authReady, setAuthReady] = useState(false);
+  const [workspaceReady, setWorkspaceReady] = useState(false);
+  const [authError, setAuthError] = useState("");
+  const [recovery, setRecovery] = useState(false);
   const [lang, setLangState] = useState<Lang>(getStoredLang);
   const t = useMemo(() => makeT(lang), [lang]);
-  setActiveLang(lang); // keep pure formatters (fmtMoney, fmtDate…) in the UI language
   const setLang = (l: Lang) => {
     setLangState(l);
     storeLang(l);
@@ -110,37 +188,159 @@ export default function App() {
     document.documentElement.lang = lang;
     document.documentElement.dir = langInfo(lang).dir;
   }, [lang]);
+  // Special routes that bypass the app shell: public storefront + super-admin.
+  const [route, setRoute] = useState(() => window.location.hash);
+  useEffect(() => {
+    const onRoute = () => setRoute(window.location.hash);
+    window.addEventListener("hashchange", onRoute);
+    return () => window.removeEventListener("hashchange", onRoute);
+  }, []);
+  const shopSlug = route.startsWith("#shop/") ? decodeURIComponent(route.slice("#shop/".length)) : null;
+  const isSuperAdmin = route === "#superadmin";
   const [page, setPage] = useState<PageKey>(() => {
     const h = window.location.hash.replace("#", "");
     return (NAV.some((n) => n.key === h) ? h : "dashboard") as PageKey;
   });
-  const [authed, setAuthed] = useState(() => sessionStorage.getItem("Managix_auth") === "1");
-  const [superAdmin, setSuperAdmin] = useState(() => window.location.hash === "#superadmin");
   const [query, setQuery] = useState("");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const toast = useToast();
 
   useEffect(() => {
-    const local = loadDB();
-    setDb(local);
-    syncEngine.onReplace = (next) => setDb(next);
-    void syncEngine.start(local);
+    if (!supabase) {
+      // No hosted auth configured (file/offline mode): boot straight into a
+      // local workspace instead of stranding the user on a dead login form.
+      // Previously this showed LoginPage with a permanent "not configured"
+      // error and no way forward — the #1 blank-wall report.
+      setDBStorageScope(null);
+      const local = loadDBIfPresent() ?? createShopDB("My Store");
+      saveDB(local);
+      setDb(local);
+      setWorkspaceReady(true);
+      setAuthReady(true);
+      setAuthError("");
+      void syncEngine.start(local, "default", async () => null).catch(() => undefined);
+      return;
+    }
+    let active = true;
+    const { data: listener } = supabase.auth.onAuthStateChange((event, nextSession) => {
+      if (!active) return;
+      if (event === "PASSWORD_RECOVERY") setRecovery(true);
+      if (event === "SIGNED_OUT") setRecovery(false);
+      setSession(nextSession);
+      setAuthReady(true);
+    });
+    void supabase.auth.getSession().then(({ data, error }) => {
+      if (!active) return;
+      if (error) setAuthError(error.message);
+      setSession(data.session);
+      setAuthReady(true);
+    });
+    return () => {
+      active = false;
+      listener.subscription.unsubscribe();
+      syncEngine.stop();
+    };
   }, []);
+
+  const userId = session?.user.id ?? null;
+  useEffect(() => {
+    if (!authReady) return;
+    // Offline / file mode (no hosted Supabase auth): the boot effect above
+    // already loaded a local workspace and started the sync engine. Running
+    // this effect in that mode would stop sync, blank the DB back to an empty
+    // createShopDB("") and strand the user on the login screen — the exact
+    // "blank wall" the offline boot branch exists to prevent. Leave offline
+    // mode entirely to the boot effect above.
+    if (!supabase) return;
+    const authClient = supabase;
+    let active = true;
+    if (!session) {
+      syncEngine.stop();
+      setWorkspaceReady(false);
+      setDBStorageScope(null);
+      setDb(createShopDB(""));
+      return () => { active = false; };
+    }
+
+    setWorkspaceReady(false);
+    setAuthError("");
+    syncEngine.onReplace = (next) => {
+      if (active) setDb(next);
+    };
+
+    void (async () => {
+      let cachedWorkspaceId: string | null = null;
+      try {
+        cachedWorkspaceId = localStorage.getItem(`Managix_workspace_${session.user.id}`);
+      } catch { /* blocked storage — no cache, keep going online */ }
+      let workspaceId: string | null = null;
+      try {
+        const { data } = await authClient.auth.getSession();
+        const token = data.session?.access_token;
+        if (!token) throw new Error("Your sign-in session has expired. Please sign in again.");
+        const response = await fetch("/api/workspaces/me", {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!response.ok) {
+          const body = await response.text();
+          throw new Error(`Workspace setup failed (${response.status}): ${body.slice(0, 180)}`);
+        }
+        const result = await response.json() as { workspaceId?: string };
+        if (!result.workspaceId) throw new Error("Workspace setup returned an invalid response.");
+        workspaceId = result.workspaceId;
+        try {
+          localStorage.setItem(`Managix_workspace_${session.user.id}`, workspaceId);
+        } catch { /* ignore */ }
+      } catch (error) {
+        if (cachedWorkspaceId && error instanceof TypeError) {
+          workspaceId = cachedWorkspaceId;
+        } else {
+          throw error;
+        }
+      }
+
+      if (!active || !workspaceId) return;
+      setDBStorageScope(workspaceId);
+      const shopName = String(session.user.user_metadata?.shop_name || "My Store");
+      const initialDB = loadDBIfPresent() ?? createShopDB(shopName);
+      saveDB(initialDB);
+      setDb(initialDB);
+      setWorkspaceReady(true);
+      await syncEngine.start(initialDB, workspaceId, async () => {
+        const { data } = await authClient.auth.getSession();
+        return data.session?.access_token ?? null;
+      });
+    })().catch((error: unknown) => {
+      if (active) {
+        setAuthError(error instanceof Error ? error.message : "Unable to open this shop.");
+        setWorkspaceReady(false);
+      }
+    });
+
+    return () => {
+      active = false;
+      syncEngine.stop();
+    };
+  }, [authReady, userId]);
 
   const sync = useSyncExternalStore(syncEngine.subscribe, syncEngine.getSnapshot);
 
   useEffect(() => {
-    if (window.location.hash !== `#${page}`) window.location.hash = page;
+    if (window.location.hash !== `#${page}`) {
+      // Don't clobber special routes (#shop/*, #superadmin) — they're handled
+      // by the early returns above. Overwriting them bounced public visitors
+      // straight back to the login screen.
+      const h = window.location.hash;
+      if (h.startsWith("#shop/") || h === "#superadmin") return;
+      window.location.hash = page;
+    }
   }, [page]);
 
   useEffect(() => {
     const onHash = () => {
-      if (window.location.hash === "#superadmin") {
-        setSuperAdmin(true);
-        return;
-      }
-      setSuperAdmin(false);
       const h = window.location.hash.replace("#", "");
+      if (h.startsWith("shop/")) return; // public route — leave it alone
+      if (h === "superadmin") return; // admin route — leave it alone
       if (NAV.some((n) => n.key === h)) setPage(h as PageKey);
     };
     window.addEventListener("hashchange", onHash);
@@ -158,43 +358,59 @@ export default function App() {
   };
 
   useEffect(() => {
-    if (!db) return;
+    if (!session) return;
     const ticked = tickSubscriptions(db);
     if (ticked === db) return;
     setDb(ticked);
     saveDB(ticked);
     syncEngine.recordChange(db, ticked);
-  }, [db]);
+  }, [db, session]);
 
-  if (superAdmin) return <SuperAdminPage />;
+  const ctx: Ctx = { db, setDB: setDb, update, navigate: setPage, currency: db.settings.currency, sync, lang, setLang, t };
 
-  if (!db) return null;
+  // Public storefront needs the shared DB but no login: load the default
+  // workspace document directly from localStorage (seeded demo if empty).
+  if (shopSlug) {
+    return (
+      <CtxReact.Provider value={ctx}>
+        <PublicShopLoader slug={shopSlug} />
+      </CtxReact.Provider>
+    );
+  }
+  if (isSuperAdmin) {
+    return (
+      <CtxReact.Provider value={ctx}>
+        <SuperAdminPage />
+      </CtxReact.Provider>
+    );
+  }
 
-  // Public storefront route — #shop/<slug>, no sign-in required.
-  const shopMatch = /^#shop\/(.+)$/.exec(window.location.hash);
-  if (shopMatch) return <StorefrontPublic db={db} slug={decodeURIComponent(shopMatch[1]!)} />;
-
-  // Signed-in staff identity (demo-grade: default to the owner account).
-  const account = accountFor(db.accounts, signedInUsername()) ?? db.accounts.find((a) => a.isOwner) ?? null;
-  const can = (module: ModuleKey, level: "view" | "edit" | "all" = "view") => {
-    if (!account) return false;
-    if (level === "view") return canView(account, module);
-    if (level === "edit") return canView(account, module);
-    return canDelete(account, module);
-  };
-
-  const ctx: Ctx = { db, setDB: setDb, update, navigate: setPage, currency: db.settings.currency, sync, lang, setLang, t, account, can };
+  const offlineReady = !supabase && workspaceReady;
 
   return (
     <CtxReact.Provider value={ctx}>
-      {!authed ? (
-        <LoginPage onLogin={() => { setAuthed(true); sessionStorage.setItem("Managix_auth", "1"); }} shopName={db.settings.shopName} />
+      {!authReady || (session && !workspaceReady) ? (
+        session ? (
+          <div className="flex min-h-full items-center justify-center p-8 text-sm text-ink-500">
+            {authError || "Opening your secure shop…"}
+            {authError ? (
+              <Button className="ml-3" variant="secondary" onClick={() => void supabase?.auth.signOut()}>Sign out</Button>
+            ) : null}
+          </div>
+        ) : <div className="flex min-h-full items-center justify-center text-sm text-ink-500">Loading…</div>
+      ) : !session && !offlineReady ? (
+        <LoginPage
+          onLogin={() => undefined}
+          shopName={db.settings.shopName}
+          authError={authError || undefined}
+          recovery={recovery}
+        />
       ) : (
         <Shell
           db={db}
           page={page}
           onNavigate={setPage}
-          onLogout={() => { setAuthed(false); sessionStorage.removeItem("Managix_auth"); }}
+          onLogout={() => { void supabase?.auth.signOut(); }}
           query={query}
           setQuery={setQuery}
           sidebarOpen={sidebarOpen}
@@ -230,20 +446,9 @@ function Shell({
   const [dark, toggleDark] = useDarkMode();
   const [chatOpen, setChatOpen] = useState(false);
   const toast = useToast();
-  const { t, account } = useApp();
+  const { t } = useApp();
   const sub = db.subscription;
   const subState = subStateSummary(sub);
-
-  // Redirect away from pages this account can't see (e.g. after role change).
-  useEffect(() => {
-    const navItem = NAV.find((n) => n.key === page);
-    if (navItem && !canView(account, navItem.module)) onNavigate("dashboard");
-  }, [page, account]);
-
-  // Guided onboarding: offer business presets once, until dismissed or chosen.
-  const [onboardingOpen, setOnboardingOpen] = useState(() => {
-    try { return localStorage.getItem("Managix_onboarding_dismissed") !== "1"; } catch { return false; }
-  });
 
   const lowStock = db.products.filter((p) => p.stock <= p.lowStockAt);
 
@@ -283,14 +488,11 @@ function Shell({
           </div>
         </div>
         <nav className="flex-1 space-y-6 overflow-y-auto px-3 py-4">
-          {NAV_GROUPS.map((group) => {
-            const items = NAV.filter((n) => n.group === group && canView(account, n.module));
-            if (items.length === 0) return null;
-            return (
+          {NAV_GROUPS.map((group) => (
             <div key={group}>
               <p className="mb-1.5 px-2.5 text-[10px] font-bold uppercase tracking-widest text-white/35">{t(group)}</p>
               <div className="space-y-0.5">
-                {items.map((n) => (
+                {NAV.filter((n) => n.group === group).map((n) => (
                   <button
                     key={n.key}
                     onClick={() => { onNavigate(n.key); setSidebarOpen(false); }}
@@ -312,23 +514,14 @@ function Shell({
                         {planName(sub)}
                       </span>
                     ) : null}
-                    {n.key === "recycle" && db.trash.length > 0 ? (
-                      <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-white/15 px-1.5 text-[10px] font-bold text-white/80">
-                        {db.trash.length}
-                      </span>
-                    ) : null}
                   </button>
                 ))}
               </div>
             </div>
-            );
-          })}
+          ))}
         </nav>
         <div className="border-t border-white/10 p-3">
-          <div className="rounded-xl border border-white/10 bg-white/[0.06] p-1.5 shadow-lg shadow-black/20 backdrop-blur">
-            <LanguageMenu variant="dark-row" placement="top-right" />
-            <div className="mx-1.5 my-1 border-t border-white/10" />
-            <div className="flex items-center gap-2.5 rounded-lg px-1.5 py-1">
+          <div className="flex items-center gap-2.5 rounded-lg px-2 py-2">
             {db.settings.ownerImage ? (
               <img
                 src={db.settings.ownerImage}
@@ -344,6 +537,7 @@ function Shell({
               <p className="truncate text-xs font-semibold text-white">{db.settings.ownerName}</p>
               <p className="text-[10px] text-white/45">{t("common.owner")}</p>
             </div>
+            <LanguageMenu variant="dark" placement="top-left" />
             <button
               onClick={toggleDark}
               title={dark ? "Switch to light mode" : "Switch to dark mode"}
@@ -354,7 +548,6 @@ function Shell({
             <button onClick={onLogout} title="Sign out" className="rounded-md p-1.5 text-white/50 hover:bg-white/10 hover:text-white">
               <IcLogout size={16} />
             </button>
-          </div>
           </div>
         </div>
       </aside>
@@ -449,6 +642,7 @@ function Shell({
             {page === "customers" && <CustomersPage />}
             {page === "suppliers" && <SuppliersPage />}
             {page === "expenses" && <ExpensesPage />}
+            {page === "dueBook" && <DueBookPage />}
             {page === "reports" && <ReportsPage />}
             {page === "staff" && <StaffPage />}
             {page === "tools" && <ToolsPage />}
@@ -472,52 +666,7 @@ function Shell({
       </div>
 
       {hasFeature(sub, "support_chat") ? <SupportChat open={chatOpen} onOpenChange={setChatOpen} /> : null}
-
-      {onboardingOpen ? (
-        <OnboardingModal
-          onClose={() => setOnboardingOpen(false)}
-          onPick={(key) => {
-            update((d) => applyPreset(d, key, d.settings.ownerName));
-            try { localStorage.setItem("Managix_onboarding_dismissed", "1"); } catch { /* ignore */ }
-            setOnboardingOpen(false);
-            toast("Catalog ready — products and categories added", "success");
-          }}
-        />
-      ) : null}
     </div>
-  );
-}
-
-/* ---------------- Guided onboarding — business-type presets ---------------- */
-
-function OnboardingModal({ onClose, onPick }: { onClose: () => void; onPick: (key: Exclude<import("./types").BusinessPreset, null>) => void }) {
-  const dismiss = () => {
-    try { localStorage.setItem("Managix_onboarding_dismissed", "1"); } catch { /* ignore */ }
-    onClose();
-  };
-  return (
-    <Modal open onClose={onClose} title="Set up your shop" wide>
-      <p className="text-sm text-ink-500">
-        Pick what you sell and Managix pre-fills categories, units and starter products. You can change everything later.
-      </p>
-      <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        {PRESETS.map((p) => (
-          <button
-            key={p.key}
-            onClick={() => onPick(p.key)}
-            className="rounded-2xl border border-ink-200 p-4 text-left transition-all hover:border-brand-400 hover:shadow-pop"
-          >
-            <span className="text-2xl">{p.emoji}</span>
-            <p className="mt-1.5 text-sm font-bold text-ink-900">{p.label}</p>
-            <p className="mt-0.5 text-xs leading-relaxed text-ink-500">{p.blurb}</p>
-            <p className="mt-2 text-[11px] font-semibold text-brand-700">{p.categories.length} categories · {p.products.length} starter products</p>
-          </button>
-        ))}
-      </div>
-      <div className="mt-4 flex justify-end">
-        <Button variant="ghost" onClick={dismiss}>Skip — I'll set up myself</Button>
-      </div>
-    </Modal>
   );
 }
 
@@ -569,4 +718,39 @@ function SyncPill({ sync }: { sync: SyncSnapshot }) {
       ) : null}
     </button>
   );
+}
+
+/** Loads the shared shop document for the no-auth public storefront route. */
+function PublicShopLoader({ slug }: { slug: string }) {
+  const [db, setDb] = useState<DB | null>(null);
+  useEffect(() => {
+    setDBStorageScope(null);
+    let doc = loadDBIfPresent();
+    if (!doc) {
+      // No local document yet (fresh browser) — the live shop lives on the
+      // server, so try the public pull before falling back to demo seed.
+      // loadDB() would seed demo data, which is wrong for a real shopper.
+      setDb(null);
+      void (async () => {
+        try {
+          const res = await fetch("/api/db/public");
+          if (res.ok) {
+            const json = (await res.json()) as { db?: DB };
+            if (json.db && Array.isArray((json.db as DB).products)) {
+              saveDB(json.db as DB);
+              setDb(json.db as DB);
+              return;
+            }
+          }
+        } catch { /* offline — fall through to demo */ }
+        setDb(loadDBIfPresent());
+      })();
+      return;
+    }
+    setDb(doc);
+  }, []);
+  if (!db) {
+    return <div className="flex min-h-screen items-center justify-center text-sm text-ink-500">Opening shop…</div>;
+  }
+  return <StorefrontPublic db={db} slug={slug} />;
 }

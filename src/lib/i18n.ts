@@ -71,12 +71,20 @@ export const LANGUAGES: LanguageInfo[] = [
 const LS_KEY = "managix_lang";
 
 export function getStoredLang(): Lang {
-  const v = localStorage.getItem(LS_KEY);
-  return LANGUAGES.some((l) => l.code === v) ? (v as Lang) : "en";
+  try {
+    const v = localStorage.getItem(LS_KEY);
+    return LANGUAGES.some((l) => l.code === v) ? (v as Lang) : "en";
+  } catch {
+    return "en";
+  }
 }
 
 export function storeLang(lang: Lang): void {
-  localStorage.setItem(LS_KEY, lang);
+  try {
+    localStorage.setItem(LS_KEY, lang);
+  } catch {
+    /* private mode — keep running in memory */
+  }
 }
 
 export function langInfo(lang: Lang): LanguageInfo {
@@ -97,6 +105,7 @@ const en: Record<string, string> = {
   "nav.suppliers": "Suppliers",
   "nav.staff": "Staff",
   "nav.expenses": "Expenses",
+  "nav.dueBook": "Due Book",
   "nav.reports": "Reports",
   "nav.tools": "Tools & Extras",
   "nav.billing": "Billing & Plan",
@@ -107,13 +116,13 @@ const en: Record<string, string> = {
   "nav.access": "Team & Access",
   "nav.recycle": "Recycle Bin",
   "group.growth": "Grow",
+  "group.account": "Account",
 
   "group.overview": "Overview",
   "group.daily": "Daily Operations",
   "group.catalog": "Catalog",
   "group.people": "People",
   "group.finance": "Finance",
-  "group.account": "Account",
 
   "login.welcome": "Welcome back",
   "login.signInTo": "Sign in to manage",
@@ -258,6 +267,7 @@ const bn: Record<string, string> = {
   "nav.suppliers": "সরবরাহকারী",
   "nav.staff": "স্টাফ",
   "nav.expenses": "খরচ",
+  "nav.dueBook": "বাকি খাতা",
   "nav.reports": "রিপোর্ট",
   "nav.tools": "টুলস ও এক্সট্রা",
   "nav.billing": "বিলিং ও প্ল্যান",
@@ -419,6 +429,7 @@ const hi: Record<string, string> = {
   "nav.suppliers": "आपूर्तिकर्ता",
   "nav.staff": "कर्मचारी",
   "nav.expenses": "खर्च",
+  "nav.dueBook": "उधार खाता",
   "nav.reports": "रिपोर्ट",
   "nav.tools": "टूल्स और एक्स्ट्रा",
   "nav.billing": "बिलिंग और प्लान",
@@ -580,6 +591,7 @@ const ar: Record<string, string> = {
   "nav.suppliers": "الموردون",
   "nav.staff": "الموظفون",
   "nav.expenses": "المصروفات",
+  "nav.dueBook": "دفتر الديون",
   "nav.reports": "التقارير",
   "nav.tools": "الأدوات والإضافات",
   "nav.billing": "الفواتير والخطة",

@@ -23,22 +23,90 @@ import { customerLocation, initDelivery, stepDelivery } from "./delivery";
 import { defaultAccounts, defaultStorefront, demoWallet } from "./defaults";
 
 const KEY = "Managix_db_v1";
+let scopedKey = KEY;
 
-export function loadDB(): DB {
+export function defaultScope(): string {
+  return "default";
+}
+
+export function scopedKeyFor(scope: string | null): string {
+  return scope ? `${KEY}_${scope}` : KEY;
+}
+
+export function setDBStorageScope(scope: string | null) {
+  scopedKey = scopedKeyFor(scope);
+}
+
+function readStoredDB(): DB | null {
   try {
-    const raw = localStorage.getItem(KEY);
+    const raw = localStorage.getItem(scopedKey);
     if (raw) {
       const parsed = JSON.parse(raw) as DB;
       if (parsed && Array.isArray(parsed.products) && Array.isArray(parsed.sales)) {
         return migrateDB(parsed);
       }
+      // Recognizable but wrong shape (very old / foreign key) — quarantine it
+      // instead of crashing the boot sequence.
+      try { localStorage.removeItem(scopedKey); } catch { /* ignore */ }
     }
   } catch {
-    /* fall through to seed */
+    // Corrupt JSON or blocked storage: quarantine the key so the app can boot
+    // to a clean demo DB instead of throwing a blank page. The raw value is
+    // preserved under a .corrupt backup for manual recovery.
+    try {
+      const raw = localStorage.getItem(scopedKey);
+      if (raw) localStorage.setItem(`${scopedKey}.corrupt.${Date.now()}`, raw);
+      localStorage.removeItem(scopedKey);
+    } catch { /* ignore */ }
   }
+  return null;
+}
+
+export function loadDB(): DB {
+  const saved = readStoredDB();
+  if (saved) return saved;
   const db = buildSeedDB();
   saveDB(db);
   return db;
+}
+
+export function loadDBIfPresent(): DB | null {
+  return readStoredDB();
+}
+
+export function createShopDB(shopName: string): DB {
+  const db = buildSeedDB();
+  return {
+    ...db,
+    products: [],
+    sales: [],
+    purchases: [],
+    customers: [],
+    suppliers: [],
+    duePayments: [],
+    openingBalancePayments: [],
+    expenses: [],
+    staff: [],
+    subInvoices: [],
+    saleReturns: [],
+    purchaseReturns: [],
+    branches: db.branches.slice(0, 1).map((branch) => ({
+      ...branch,
+      name: `${shopName} - Main Branch`,
+      address: "",
+    })),
+    accounts: [],
+    audit: [],
+    trash: [],
+    wallet: [],
+    walletAccounts: [],
+    threads: [],
+    reminders: [],
+    campaigns: [],
+    storefront: { ...db.storefront, enabled: false, slug: "" },
+    storefrontOrders: [],
+    settings: { ...db.settings, shopName },
+  };
 }
 
 const LEGACY_CATEGORY_MAP: Record<string, string> = {
@@ -57,18 +125,28 @@ const LEGACY_CATEGORY_MAP: Record<string, string> = {
  * Preserves all existing business data.
  */
 export function migrateDB(db: DB): DB {
+  // Defensive: a half-written / foreign document can have nulls where arrays
+  // belong — `db.products.some` would throw and blank the whole site.
+  const asArray = <T,>(v: unknown): T[] => (Array.isArray(v) ? (v as T[]) : []);
+  const products = asArray<Product>(db.products);
+  const customers = asArray<Customer>(db.customers);
+  const suppliers = asArray<Supplier>(db.suppliers);
   const needsCategories = !Array.isArray(db.categories) || db.categories.length === 0;
   const needsSubscription = !db.subscription || !db.subscription.currentPeriodEnd;
   const needsSettings =
     !db.settings || typeof (db.settings as { monthlyTarget?: number }).monthlyTarget !== "number";
-  const hasLegacyCategory = db.products.some((p) => (p as unknown as { category?: string }).category);
+  const hasLegacyCategory = products.some((p) => (p as unknown as { category?: string }).category);
   const needsPhase6 =
     !Array.isArray((db as Partial<DB>).accounts) ||
     !Array.isArray((db as Partial<DB>).trash) ||
     !Array.isArray((db as Partial<DB>).wallet) ||
     !Array.isArray((db as Partial<DB>).storefrontOrders) ||
     !(db as Partial<DB>).storefront;
-  const needsProductFields = db.products.some(
+  const needsDuePayments = !Array.isArray((db as Partial<DB>).duePayments);
+  const needsOpeningBalances =
+    customers.some((c) => (c as Partial<Customer>).openingDue === undefined) ||
+    suppliers.some((s) => (s as Partial<Supplier>).openingDue === undefined);
+  const needsProductFields = products.some(
     (p) =>
       (p as Partial<Product>).forRetailSale === undefined ||
       (p as Partial<Product>).lowStockAlert === undefined ||
@@ -90,7 +168,9 @@ export function migrateDB(db: DB): DB {
     !hasLegacyCategory &&
     !needsProductFields &&
     !needsPhase4 &&
-    !needsPhase6
+    !needsPhase6 &&
+    !needsDuePayments &&
+    !needsOpeningBalances
   )
     return db;
 
@@ -118,10 +198,19 @@ export function migrateDB(db: DB): DB {
     }),
     customers: db.customers.map((c) => ({
       ...c,
+      openingDue: c.openingDue ?? 0,
       tier: c.tier ?? ("retail" as PriceTier),
       creditLimit: c.creditLimit ?? 0,
       points: c.points ?? 0,
     })),
+    suppliers: db.suppliers.map((s) => ({ ...s, openingDue: s.openingDue ?? 0 })),
+    duePayments: Array.isArray((db as Partial<DB>).duePayments)
+      ? (db as Partial<DB>).duePayments!
+      : ((db as Partial<DB>).openingBalancePayments ?? []).map((payment) => ({
+          ...payment,
+          source: "opening" as const,
+          reference: "Opening balance",
+        })),
     saleReturns: Array.isArray((db as Partial<DB>).saleReturns) ? (db as Partial<DB>).saleReturns! : [],
     purchaseReturns: Array.isArray((db as Partial<DB>).purchaseReturns) ? (db as Partial<DB>).purchaseReturns! : [],
     branches: Array.isArray((db as Partial<DB>).branches) ? (db as Partial<DB>).branches! : [
@@ -155,9 +244,10 @@ export function migrateDB(db: DB): DB {
 
 export function saveDB(db: DB) {
   try {
-    localStorage.setItem(KEY, JSON.stringify(db));
+    localStorage.setItem(scopedKey, JSON.stringify(db));
   } catch {
-    /* storage full or unavailable */
+    // Quota / private-mode writes must not crash the render loop — the in-memory
+    // DB keeps working and sync will push it when storage is available again.
   }
 }
 
@@ -213,10 +303,16 @@ export function computeKpis(db: DB): Kpis {
     }
     cashOnHand += s.paidAmount;
   }
+  for (const c of db.customers) dueFromCustomers += Math.max(0, c.openingDue || 0);
   for (const p of db.purchases) {
     const outstanding = p.total - p.paidAmount;
     if (outstanding > 0.009) dueToSuppliers += outstanding;
     cashOnHand -= p.paidAmount;
+  }
+  for (const s of db.suppliers) dueToSuppliers += Math.max(0, s.openingDue || 0);
+  for (const payment of db.duePayments ?? []) {
+    if (payment.source !== "opening") continue;
+    cashOnHand += payment.direction === "in" ? payment.amount : -payment.amount;
   }
   for (const e of db.expenses) {
     cashOnHand -= e.amount;
@@ -256,7 +352,7 @@ export function customerDueList(db: DB, customerId: string) {
 }
 
 export function supplierDue(db: DB, supplierId: string): number {
-  let due = 0;
+  let due = db.suppliers.find((s) => s.id === supplierId)?.openingDue ?? 0;
   for (const p of db.purchases) {
     if (p.supplierId === supplierId && p.payment === "Due") {
       due += p.total - p.paidAmount;
@@ -689,6 +785,11 @@ export function nextRefNo(db: DB): string {
 }
 
 export function collectDue(db: DB, saleId: string, amount: number): DB {
+  if (!Number.isFinite(amount) || amount <= 0) return db;
+  const sale = db.sales.find((s) => s.id === saleId);
+  if (!sale || sale.payment !== "Due" || sale.total - sale.paidAmount <= 0.009) return db;
+  const paidAmount = round2(Math.min(sale.total - sale.paidAmount, amount));
+  if (paidAmount <= 0) return db;
   const sales = db.sales.map((s) => {
     if (s.id !== saleId) return s;
     const paid = round2(Math.min(s.total, s.paidAmount + amount));
@@ -699,16 +800,71 @@ export function collectDue(db: DB, saleId: string, amount: number): DB {
       payment: paid >= s.total - 0.009 ? "Cash" : s.payment,
     } as Sale;
   });
-  return { ...db, sales };
+  return {
+    ...db,
+    sales,
+    duePayments: [
+      ...db.duePayments,
+      { id: uid("dp"), at: new Date().toISOString(), party: "customer", partyId: sale.customerId ?? "", direction: "in", amount: paidAmount, source: "invoice", reference: sale.invoiceNo },
+    ],
+  };
 }
 
 export function paySupplier(db: DB, purchaseId: string, amount: number): DB {
+  if (!Number.isFinite(amount) || amount <= 0) return db;
+  const purchase = db.purchases.find((p) => p.id === purchaseId);
+  if (!purchase || purchase.payment !== "Due" || purchase.total - purchase.paidAmount <= 0.009) return db;
+  const paidAmount = round2(Math.min(purchase.total - purchase.paidAmount, amount));
+  if (paidAmount <= 0) return db;
   const purchases = db.purchases.map((p) => {
     if (p.id !== purchaseId) return p;
     const paid = round2(Math.min(p.total, p.paidAmount + amount));
     return { ...p, paidAmount: paid, payment: paid >= p.total - 0.009 ? "Paid" : "Due" } as Purchase;
   });
-  return { ...db, purchases };
+  return {
+    ...db,
+    purchases,
+    duePayments: [
+      ...db.duePayments,
+      { id: uid("dp"), at: new Date().toISOString(), party: "supplier", partyId: purchase.supplierId ?? "", direction: "out", amount: paidAmount, source: "invoice", reference: purchase.refNo },
+    ],
+  };
+}
+
+export function collectCustomerOpeningDue(db: DB, customerId: string, amount: number): DB {
+  if (!Number.isFinite(amount) || amount <= 0) return db;
+  const customer = db.customers.find((c) => c.id === customerId);
+  if (!customer || customer.openingDue <= 0) return db;
+  const paid = round2(Math.min(customer.openingDue, amount));
+  if (paid <= 0) return db;
+  return {
+    ...db,
+    customers: db.customers.map((c) =>
+      c.id === customerId ? { ...c, openingDue: round2(Math.max(0, c.openingDue - paid)) } : c
+    ),
+    duePayments: [
+      ...db.duePayments,
+      { id: uid("dp"), at: new Date().toISOString(), party: "customer", partyId: customerId, direction: "in", amount: paid, source: "opening", reference: "Opening balance" },
+    ],
+  };
+}
+
+export function paySupplierOpeningDue(db: DB, supplierId: string, amount: number): DB {
+  if (!Number.isFinite(amount) || amount <= 0) return db;
+  const supplier = db.suppliers.find((s) => s.id === supplierId);
+  if (!supplier || supplier.openingDue <= 0) return db;
+  const paid = round2(Math.min(supplier.openingDue, amount));
+  if (paid <= 0) return db;
+  return {
+    ...db,
+    suppliers: db.suppliers.map((s) =>
+      s.id === supplierId ? { ...s, openingDue: round2(Math.max(0, s.openingDue - paid)) } : s
+    ),
+    duePayments: [
+      ...db.duePayments,
+      { id: uid("dp"), at: new Date().toISOString(), party: "supplier", partyId: supplierId, direction: "out", amount: paid, source: "opening", reference: "Opening balance" },
+    ],
+  };
 }
 
 export function upsertProduct(db: DB, p: Product): DB {

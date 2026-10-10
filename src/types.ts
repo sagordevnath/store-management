@@ -169,6 +169,17 @@ export interface Supplier {
   createdAt: string;
 }
 
+export interface DuePayment {
+  id: ID;
+  at: string;
+  party: "customer" | "supplier";
+  partyId: ID;
+  direction: "in" | "out";
+  amount: number;
+  source: "opening" | "invoice";
+  reference: string;
+}
+
 export type ExpenseCategory =
   | "Rent"
   | "Utilities"
@@ -412,6 +423,15 @@ export interface DB {
   purchases: Purchase[];
   customers: Customer[];
   suppliers: Supplier[];
+  duePayments: DuePayment[];
+  openingBalancePayments?: {
+    id: ID;
+    at: string;
+    party: "customer" | "supplier";
+    partyId: ID;
+    direction: "in" | "out";
+    amount: number;
+  }[];
   expenses: Expense[];
   staff: StaffMember[];
   subscription: Subscription;

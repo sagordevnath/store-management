@@ -271,6 +271,12 @@ export function periodMetrics(db: DB, key: PeriodKey): PeriodMetrics {
       if (inP(s.at)) dueIncurred += out;
     }
   }
+  for (const c of db.customers) {
+    if (c.openingDue > 0.009) {
+      dueTotal += c.openingDue;
+      dueCustIds.add(c.id);
+    }
+  }
 
   /* Payables: outstanding to suppliers now + incurred in period */
   let payableTotal = 0;
@@ -282,6 +288,12 @@ export function periodMetrics(db: DB, key: PeriodKey): PeriodMetrics {
       payableTotal += out;
       if (p.supplierId) payableSupIds.add(p.supplierId);
       if (inP(p.at)) payableIncurred += out;
+    }
+  }
+  for (const s of db.suppliers) {
+    if (s.openingDue > 0.009) {
+      payableTotal += s.openingDue;
+      payableSupIds.add(s.id);
     }
   }
 

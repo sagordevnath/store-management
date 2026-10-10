@@ -41,7 +41,9 @@ export interface Registry {
 }
 
 const KEY = "Managix_registry_v1";
-export const SA_PASSCODE = "246810";
+/** Demo-gate passcode. Override in production via VITE_SA_PASSCODE env. */
+export const SA_PASSCODE: string =
+  (import.meta.env?.VITE_SA_PASSCODE as string | undefined) || "246810";
 const DAY = 86_400_000;
 
 function daysAgo(n: number, hour = 9): string {
@@ -100,7 +102,7 @@ export function loadRegistry(): Registry {
       if (parsed && Array.isArray(parsed.subscribers)) return parsed;
     }
   } catch {
-    /* fall through */
+    try { localStorage.removeItem(KEY); } catch { /* ignore */ }
   }
   const reg = seed();
   saveRegistry(reg);

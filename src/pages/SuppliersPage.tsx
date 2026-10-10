@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useApp } from "../App";
 import type { Supplier } from "../types";
-import { upsertSupplier, supplierDue, paySupplier } from "../lib/store";
+import { upsertSupplier, supplierDue, paySupplier, paySupplierOpeningDue } from "../lib/store";
 import { softDelete } from "../lib/recycle";
 import { logAudit } from "../lib/audit";
 import { fmtMoney, initials, uid, downloadCSV } from "../lib/helpers";
@@ -13,7 +13,7 @@ export default function SuppliersPage() {
   const toast = useToast();
   const [search, setSearch] = useState("");
   const [editing, setEditing] = useState<Supplier | null>(null);
-  const [payFor, setPayFor] = useState<{ supplier: Supplier; purchaseId: string; due: number } | null>(null);
+  const [payFor, setPayFor] = useState<{ supplier: Supplier; purchaseId: string | null; due: number } | null>(null);
   const [amount, setAmount] = useState(0);
   const [confirmDelete, setConfirmDelete] = useState<Supplier | null>(null);
 
@@ -31,6 +31,7 @@ export default function SuppliersPage() {
   }, [db, search]);
 
   const totalDue = rows.reduce((a, r) => a + r.due, 0);
+  const activeSuppliers = rows.filter((r) => r.due > 0.009);
 
   const supplierBills = (supplierId: string) =>
     db.purchases
@@ -39,28 +40,50 @@ export default function SuppliersPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-bold text-ink-900">Suppliers</h1>
-          <p className="text-sm text-ink-500">
-            {db.suppliers.length} suppliers · <span className="font-semibold text-red-600">{fmtMoney(totalDue, currency)}</span> payable
-          </p>
+      <div className="rounded-3xl border border-slate-800/60 bg-gradient-to-r from-slate-950 via-slate-900 to-rose-950 p-4 text-white shadow-[0_24px_50px_-28px_rgba(244,63,94,0.7)]">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-rose-300">Payables</p>
+            <h1 className="mt-1 text-xl font-bold text-white">Suppliers</h1>
+            <p className="mt-1 text-sm text-slate-300">
+              {db.suppliers.length} suppliers · <span className="font-semibold text-red-200">{fmtMoney(totalDue, currency)}</span> payable
+            </p>
+          </div>
+          <div className="flex gap-2">
+            <Button
+              variant="secondary"
+              onClick={() =>
+                downloadCSV("suppliers.csv", [
+                  ["Company", "Contact", "Phone", "Orders", "Purchased", "Due"],
+                  ...rows.map(({ s, purchases, totalPurchased, due }) => [s.company, s.name, s.phone, purchases, totalPurchased, due]),
+                ])
+              }
+              className="border-white/15 bg-white/5 text-white hover:bg-white/10 hover:text-white"
+            >
+              <IcDownload size={15} /> Export
+            </Button>
+            <Button onClick={() => setEditing({ id: uid("s"), name: "", company: "", phone: "", openingDue: 0, createdAt: new Date().toISOString() })} className="bg-rose-500 text-white hover:bg-rose-400">
+              <IcPlus size={16} /> Add supplier
+            </Button>
+          </div>
         </div>
-        <div className="flex gap-2">
-          <Button
-            variant="secondary"
-            onClick={() =>
-              downloadCSV("suppliers.csv", [
-                ["Company", "Contact", "Phone", "Orders", "Purchased", "Due"],
-                ...rows.map(({ s, purchases, totalPurchased, due }) => [s.company, s.name, s.phone, purchases, totalPurchased, due]),
-              ])
-            }
-          >
-            <IcDownload size={15} /> Export
-          </Button>
-          <Button onClick={() => setEditing({ id: uid("s"), name: "", company: "", phone: "", openingDue: 0, createdAt: new Date().toISOString() })}>
-            <IcPlus size={16} /> Add supplier
-          </Button>
+      </div>
+
+      <div className="grid gap-3 md:grid-cols-3">
+        <div className="rounded-2xl border border-red-100 bg-gradient-to-br from-red-50 via-white to-rose-100/90 p-4 shadow-[0_16px_30px_-26px_rgba(239,68,68,0.8)]">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-red-500">Payable</p>
+          <p className="mt-2 text-2xl font-bold text-red-600">{fmtMoney(totalDue, currency)}</p>
+          <p className="mt-1 text-xs text-ink-500">Total due to suppliers</p>
+        </div>
+        <div className="rounded-2xl border border-orange-100 bg-gradient-to-br from-orange-50 via-white to-yellow-100/90 p-4 shadow-[0_16px_30px_-26px_rgba(249,115,22,0.8)]">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-orange-500">Suppliers</p>
+          <p className="mt-2 text-2xl font-bold text-orange-600">{activeSuppliers.length}</p>
+          <p className="mt-1 text-xs text-ink-500">With open balances</p>
+        </div>
+        <div className="rounded-2xl border border-violet-100 bg-gradient-to-br from-violet-50 via-white to-fuchsia-100/90 p-4 shadow-[0_16px_30px_-26px_rgba(168,85,247,0.8)]">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-violet-500">Bills</p>
+          <p className="mt-2 text-2xl font-bold text-violet-600">{db.purchases.filter((p) => p.payment === "Due" && p.total - p.paidAmount > 0.009).length}</p>
+          <p className="mt-1 text-xs text-ink-500">Outstanding purchase invoices</p>
         </div>
       </div>
 
@@ -84,31 +107,35 @@ export default function SuppliersPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-ink-100">
-                {rows.map(({ s, purchases, totalPurchased, due }) => (
-                  <tr key={s.id} className="hover:bg-ink-50/60">
-                    <Td>
-                      <div className="flex items-center gap-2.5">
-                        <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-violet-50 text-[11px] font-bold text-violet-600">{initials(s.company)}</span>
-                        <div>
-                          <p className="font-medium text-ink-900">{s.company}</p>
-                          <p className="text-xs text-ink-400">{s.name}</p>
+                {rows.map(({ s, purchases, totalPurchased, due }) => {
+                  const bills = supplierBills(s.id);
+                  return (
+                    <tr key={s.id} className="hover:bg-ink-50/60">
+                      <Td>
+                        <div className="flex items-center gap-2.5">
+                          <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-violet-50 text-[11px] font-bold text-violet-600">{initials(s.company)}</span>
+                          <div>
+                            <p className="font-medium text-ink-900">{s.company}</p>
+                            <p className="text-xs text-ink-400">{s.name}</p>
+                          </div>
                         </div>
-                      </div>
-                    </Td>
-                    <Td className="text-ink-500">{s.phone || "—"}</Td>
-                    <Td className="text-right text-ink-500">{purchases}</Td>
-                    <Td className="text-right text-ink-500">{fmtMoney(totalPurchased, currency)}</Td>
-                    <Td className="text-right font-semibold">
-                      {due > 0.009 ? <span className="text-red-600">{fmtMoney(due, currency)}</span> : <span className="text-ink-300">—</span>}
-                    </Td>
-                    <Td>
-                      <div className="flex items-center justify-end gap-1">
-                        <Button size="sm" variant="ghost" onClick={() => setEditing(s)}><IcEdit size={14} /></Button>
-                        <Button size="sm" variant="ghost" className="text-red-500 hover:bg-red-50" onClick={() => setConfirmDelete(s)}><IcTrash size={14} /></Button>
-                      </div>
-                    </Td>
-                  </tr>
-                ))}
+                      </Td>
+                      <Td className="text-ink-500">{s.phone || "—"}</Td>
+                      <Td className="text-right text-ink-500">{purchases}</Td>
+                      <Td className="text-right text-ink-500">{fmtMoney(totalPurchased, currency)}</Td>
+                      <Td className="text-right font-semibold">
+                        {due > 0.009 ? <span className="text-red-600">{fmtMoney(due, currency)}</span> : <span className="text-ink-300">—</span>}
+                        {bills.length > 0 ? <span className="mt-1 block text-[10px] font-medium text-amber-600">{bills.length} bill{bills.length === 1 ? "" : "s"} due</span> : null}
+                      </Td>
+                      <Td>
+                        <div className="flex items-center justify-end gap-1">
+                          <Button size="sm" variant="ghost" onClick={() => setEditing(s)}><IcEdit size={14} /></Button>
+                          <Button size="sm" variant="ghost" className="text-red-500 hover:bg-red-50" onClick={() => setConfirmDelete(s)}><IcTrash size={14} /></Button>
+                        </div>
+                      </Td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -122,6 +149,26 @@ export default function SuppliersPage() {
           <p className="text-xs text-ink-500">Pay wholesalers directly from recorded purchase orders</p>
         </div>
         <div className="divide-y divide-ink-100">
+          {db.suppliers
+            .filter((s) => s.openingDue > 0.009)
+            .sort((a, b) => b.openingDue - a.openingDue)
+            .map((s) => (
+              <div key={`opening-${s.id}`} className="flex items-center justify-between gap-3 px-5 py-3">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-ink-900">Opening balance · {s.company}</p>
+                  <p className="text-xs text-ink-400">Balance owed before joining the app</p>
+                </div>
+                <div className="flex items-center gap-3">
+                  <span className="text-sm font-bold text-red-600">{fmtMoney(s.openingDue, currency)}</span>
+                  <Button size="sm" variant="success" onClick={() => {
+                    setPayFor({ supplier: s, purchaseId: null, due: s.openingDue });
+                    setAmount(s.openingDue);
+                  }}>
+                    <IcCash size={13} /> Pay
+                  </Button>
+                </div>
+              </div>
+            ))}
           {db.purchases
             .filter((p) => p.payment === "Due" && p.total - p.paidAmount > 0.009)
             .sort((a, b) => (a.at < b.at ? 1 : -1))
@@ -150,7 +197,7 @@ export default function SuppliersPage() {
                 </div>
               );
             })}
-          {db.purchases.every((p) => p.total - p.paidAmount <= 0.009) ? (
+          {db.purchases.every((p) => p.total - p.paidAmount <= 0.009) && db.suppliers.every((s) => s.openingDue <= 0.009) ? (
             <p className="px-5 py-8 text-center text-sm text-ink-400">All supplier bills are settled. Great cash discipline!</p>
           ) : null}
         </div>
@@ -164,9 +211,11 @@ export default function SuppliersPage() {
         footer={
           <div className="flex justify-end gap-2">
             <Button variant="secondary" onClick={() => setPayFor(null)}>Cancel</Button>
-            <Button variant="success" disabled={amount <= 0} onClick={() => {
+            <Button variant="success" disabled={amount <= 0 || amount > (payFor?.due ?? 0)} onClick={() => {
               if (!payFor) return;
-              update((d) => paySupplier(d, payFor.purchaseId, amount));
+              update((d) => payFor.purchaseId
+                ? paySupplier(d, payFor.purchaseId, amount)
+                : paySupplierOpeningDue(d, payFor.supplier.id, amount));
               toast(`Paid ${fmtMoney(amount, currency)} to ${payFor.supplier.company}`);
               setPayFor(null);
             }}>
@@ -176,7 +225,7 @@ export default function SuppliersPage() {
         }
       >
         <Field label="Amount paid" hint={`Bill outstanding: ${fmtMoney(payFor?.due ?? 0, currency)}`}>
-          <NumberInput value={amount} min={0} step="0.01" onChange={(e) => setAmount(Number(e.target.value) || 0)} />
+          <NumberInput value={amount} min={0} max={payFor?.due} step="0.01" onChange={(e) => setAmount(Number(e.target.value) || 0)} />
         </Field>
       </Modal>
 

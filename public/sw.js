@@ -7,8 +7,8 @@
  *  - The business data itself lives in localStorage; the sync engine replays
  *    queued changes when the connection returns.
  */
-const CACHE = "managix-v1";
-const SHELL = ["/", "/index.html", "/manifest.webmanifest"];
+const CACHE = "managix-v2";
+const SHELL = ["/", "/index.html", "/manifest.webmanifest", "/icons/icon.svg"];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
@@ -48,6 +48,21 @@ self.addEventListener("fetch", (event) => {
 
   // Dev server websocket / HMR — never cache.
   if (url.pathname.startsWith("/@vite") || url.pathname.includes("hmr")) return;
+
+  // Navigations (/, /index.html, deep hash routes): network-first so a new
+  // deploy shows up immediately, offline falls back to cached shell.
+  if (req.mode === "navigate") {
+    event.respondWith(
+      fetch(req)
+        .then((res) => {
+          const copy = res.clone();
+          caches.open(CACHE).then((c) => c.put("/index.html", copy));
+          return res;
+        })
+        .catch(() => caches.match("/index.html").then((m) => m || caches.match("/")))
+    );
+    return;
+  }
 
   // App shell & assets: stale-while-revalidate.
   event.respondWith(
